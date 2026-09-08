@@ -80,7 +80,7 @@ jobs:
           (cd dist && zip -qr ../site.zip .)
           ls -lh site.zip
 
-      - name: Dépôt sur Netlify
+      - name: Dépôt sur Netlify (statique + functions)
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
@@ -89,16 +89,12 @@ jobs:
             echo "secrets Netlify absents — dépôt ignoré"
             exit 0
           fi
-          curl -sSf -H "Content-Type: application/zip" \
-               -H "Authorization: Bearer $NETLIFY_AUTH_TOKEN" \
-               --data-binary "@site.zip" \
-               "https://api.netlify.com/api/v1/sites/$NETLIFY_SITE_ID/deploys" \
-               -o deploy.json
-          python3 - <<'PY'
-          import json
-          d = json.load(open("deploy.json", encoding="utf-8"))
-          print("déployé :", d.get("ssl_url") or d.get("url"), "— état", d.get("state"))
-          PY
+          # le CLI déploie le statique ET les functions (le simple dépôt zip
+          # ignore les functions et les supprimerait)
+          cd dist
+          npx -y netlify-cli@latest deploy --prod \
+            --auth="$NETLIFY_AUTH_TOKEN" --site="$NETLIFY_SITE_ID" \
+            --dir=. --functions=netlify/functions
 
       - name: Résumé
         if: always()
