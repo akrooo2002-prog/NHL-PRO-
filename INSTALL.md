@@ -6,7 +6,7 @@ Détail complet dans **`FREE.md`**. Cette page est le pense-bête.
 |---|---|---|---|
 | **1. Le site** | [app.netlify.com/drop](https://app.netlify.com/drop) | 5 min | une URL publique, les analyses, les podiums |
 | **2. Le moteur** | [github.com/new](https://github.com/new) | 10 min | le bouton **Rafraîchir** (régénère les stats) |
-| **3. Le proxy** | [dash.cloudflare.com](https://dash.cloudflare.com) → Workers | 5 min | l'onglet **Live** |
+| **3. Le Live** | inclus | 0 min | functions Netlify déployées par le workflow |
 
 Faites-les dans cet ordre : chaque étape donne l'information dont la suivante a besoin.
 
@@ -36,19 +36,10 @@ et l'onglet Live explique qu'il lui faut le proxy de l'étape 3. C'est normal.
 4. Onglet **Actions → Rafraîchir les analyses → Run workflow**.
    ~3 minutes, puis le site Netlify est mis à jour.
 
-## Étape 3 — Cloudflare Worker (le Live)
+## Étape 3 — inutile : le Live est déjà inclus
 
-1. Workers & Pages → **Create** → **Hello World** → renommez-le `nhl-proxy`.
-2. **Edit code** : collez le contenu de `worker/worker.js`, **Deploy**.
-   L'URL ressemble à `https://nhl-proxy.VOTRE-NOM.workers.dev`.
-3. Onglet **Settings → Variables and Secrets**, ajoutez :
-   `GITHUB_REPO` (`pseudo/depot`), `GITHUB_TOKEN` (jeton GitHub avec droit `workflow`),
-   `GITHUB_WORKFLOW` (`refresh.yml`), `REFRESH_TOKEN` (un mot de passe à vous).
-4. Redeployez. Vérifiez : `https://nhl-proxy.VOTRE-NOM.workers.dev/healthz` → `{"ok":true}`.
-5. Retour sur GitHub, dépôt → **Settings → Secrets and variables → Actions → Variables** :
-   ajoutez `WORKER_URL` = l'adresse du Worker.
-6. Relancez le workflow. Netlify reçoit alors un `config.json` : **le Live et le bouton
-   Rafraîchir apparaissent sur le site.**
+Les functions Netlify (`/live`, `/refresh`, `/healthz`) sont déployées avec le site par
+le workflow. Pas de compte Cloudflare, pas de CORS, tout sur la même adresse.
 
 ---
 
