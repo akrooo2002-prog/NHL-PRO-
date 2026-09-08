@@ -81,11 +81,14 @@ jobs:
           ls -lh site.zip
 
       - name: Dépôt sur Netlify
-        if: ${{ secrets.NETLIFY_AUTH_TOKEN != '' && secrets.NETLIFY_SITE_ID != '' }}
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
         run: |
+          if [ -z "$NETLIFY_AUTH_TOKEN" ] || [ -z "$NETLIFY_SITE_ID" ]; then
+            echo "secrets Netlify absents — dépôt ignoré"
+            exit 0
+          fi
           curl -sSf -H "Content-Type: application/zip" \
                -H "Authorization: Bearer $NETLIFY_AUTH_TOKEN" \
                --data-binary "@site.zip" \
@@ -96,12 +99,6 @@ jobs:
           d = json.load(open("deploy.json", encoding="utf-8"))
           print("déployé :", d.get("ssl_url") or d.get("url"), "— état", d.get("state"))
           PY
-
-      - name: Dépôt sur Cloudflare Pages (variante)
-        if: ${{ secrets.CLOUDFLARE_API_TOKEN != '' && vars.CLOUDFLARE_ACCOUNT_ID != '' && vars.CF_PROJECT != '' }}
-        run: |
-          npm i -g wrangler@latest
-          wrangler pages deploy dist --project-name "${{ vars.CF_PROJECT }}" --commit-dirty=true
 
       - name: Résumé
         if: always()
