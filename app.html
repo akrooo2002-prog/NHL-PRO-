@@ -1,0 +1,1162 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0a0c10">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="NHL Pronos">
+<title>NHL Pronos — quel marché jouer, et pourquoi</title>
+<style>
+*{box-sizing:border-box}
+:root{
+  --bg:#0a0c10; --card:#12161c; --card2:#171c24; --line:#222934;
+  --txt:#e8edf4; --mut:#8896a8; --acc:#4da3ff; --gold:#f2c14e; --sil:#b9c3d0; --brz:#d09264;
+  --ok:#3ecf8e; --warn:#ffb020; --bad:#ff5f6d;
+}
+html,body{margin:0;padding:0}
+body{background:var(--bg);color:var(--txt);
+  font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  -webkit-font-smoothing:antialiased;overscroll-behavior-y:none}
+a{color:var(--acc);text-decoration:none}
+code{background:#0f1319;border:1px solid var(--line);border-radius:5px;padding:1px 5px;font-size:12.5px}
+.num{font-variant-numeric:tabular-nums}
+.mut{color:var(--mut)}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+
+/* ---------- en-tête ---------- */
+#hdr{position:sticky;top:0;z-index:20;background:rgba(10,12,16,.92);
+  backdrop-filter:blur(10px);border-bottom:1px solid var(--line);
+  padding:10px 14px 9px;padding-top:calc(10px + env(safe-area-inset-top))}
+.brand{display:flex;align-items:center;gap:9px}
+.logo{width:26px;height:26px;border-radius:8px;background:linear-gradient(140deg,#4da3ff,#1f5fd0);
+  display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px;color:#fff;flex:0 0 auto}
+.brand h1{font-size:16px;margin:0;font-weight:700;letter-spacing:-.2px}
+.brand .sp{flex:1}
+#hdrSub{margin:7px 0 0;font-size:12px;color:var(--mut);line-height:1.4}
+.badges{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.badge{font-size:11px;border:1px solid var(--line);border-radius:999px;padding:3px 9px;color:var(--mut);background:#0f1319}
+.badge.w{color:#ffd479;border-color:#4a3a18;background:#1d1710}
+.badge.f{color:#8fd7ff;border-color:#1e3550;background:#101a24}
+
+/* ---------- boutons ---------- */
+.btn{appearance:none;border:1px solid var(--line);background:#141922;color:var(--txt);
+  border-radius:10px;padding:9px 13px;font:inherit;font-size:13.5px;cursor:pointer;
+  display:inline-flex;align-items:center;gap:7px;transition:.15s;min-height:40px}
+.btn:active{transform:scale(.97)}
+.btn.pri{background:var(--acc);border-color:var(--acc);color:#04121f;font-weight:650}
+.btn.pri:disabled{opacity:.45}
+.btn.gh{background:transparent}
+.btn.sm{min-height:32px;padding:5px 10px;font-size:12.5px}
+.btn.on{border-color:var(--acc);color:var(--acc)}
+.ctl{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 14px}
+.ctl .sp{flex:1}
+.ic{width:16px;height:16px;flex:0 0 auto}
+.spin{animation:sp 1s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+
+/* ---------- navigation basse ---------- */
+#nav{position:fixed;left:0;right:0;bottom:0;z-index:30;display:flex;
+  background:rgba(13,16,21,.96);backdrop-filter:blur(12px);
+  border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom)}
+#nav button{flex:1;appearance:none;border:0;background:transparent;color:var(--mut);
+  padding:9px 2px 8px;font:inherit;font-size:10.5px;display:flex;flex-direction:column;
+  align-items:center;gap:3px;cursor:pointer;transition:.15s}
+#nav button svg{width:20px;height:20px}
+#nav button.on{color:var(--acc)}
+#nav button.on svg{filter:drop-shadow(0 0 6px rgba(77,163,255,.45))}
+
+/* ---------- contenu ---------- */
+#main{padding:14px 14px 96px;max-width:1080px;margin:0 auto}
+#foot{padding:0 14px 110px;max-width:1080px;margin:0 auto;font-size:11.5px;color:#5f6b7b;line-height:1.5}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin:0 0 12px}
+.card h2{margin:0 0 9px;font-size:14.5px;letter-spacing:-.1px}
+.card h3{margin:0 0 8px;font-size:13.5px}
+.note{margin:0;color:var(--mut);font-size:13px;line-height:1.5}
+.day{margin:20px 0 10px;font-size:12px;text-transform:uppercase;letter-spacing:.09em;
+  color:var(--mut);font-weight:650;display:flex;align-items:center;gap:10px}
+.day:before,.day:after{content:"";height:1px;background:var(--line);flex:1}
+.day:first-child{margin-top:4px}
+.pill{display:inline-block;font-size:10.5px;border:1px solid var(--line);border-radius:999px;
+  padding:2px 7px;color:var(--mut);background:#0f1319;vertical-align:1px}
+.pill.pre{color:#c8a4ff;border-color:#3a2b52;background:#171226}
+.pill.g{color:#7fe0b0;border-color:#1d4535;background:#0f1d18}
+.pill.r{color:#ff9aa4;border-color:#4a2028;background:#1d1013}
+.pill.n{color:#8fd7ff;border-color:#1e3550;background:#101a24}
+
+/* ---------- podium ---------- */
+.podium{display:flex;gap:8px;align-items:flex-end}
+.pod{flex:1;background:var(--card2);border:1px solid var(--line);border-radius:13px;
+  padding:9px 7px;text-align:center;cursor:pointer;transition:.15s;position:relative}
+.pod:active{transform:scale(.98)}
+.pod .rk{position:absolute;top:-8px;left:50%;transform:translateX(-50%);
+  font-size:11px;font-weight:800;border-radius:999px;padding:2px 8px;background:#0f1319;border:1px solid var(--line)}
+.pod.r1 .rk{background:#3a2f10;border-color:#6b5417;color:var(--gold)}
+.pod.r2 .rk{background:#232a33;border-color:#3b4653;color:var(--sil)}
+.pod.r3 .rk{background:#2e1f14;border-color:#5b3d24;color:var(--brz)}
+.pod.r1{border-color:#4a3d16;background:linear-gradient(180deg,#1c1a12,#171c24)}
+.pod img{width:52px;height:52px;border-radius:50%;object-fit:cover;background:#0f1319;
+  border:2px solid var(--line);display:block;margin:6px auto 5px}
+.pod.r1 img{width:60px;height:60px;border-color:#6b5417}
+.pod .nm{font-size:12px;font-weight:650;line-height:1.25;min-height:30px;
+  display:flex;align-items:center;justify-content:center}
+.pod .tm{font-size:10px;color:var(--mut);letter-spacing:.04em}
+.pod .pc{font-size:19px;font-weight:800;margin-top:5px;letter-spacing:-.5px}
+.pod .st{font-size:9.5px;color:var(--gold);letter-spacing:-1px}
+.pod .mt{font-size:9.5px;color:var(--mut);margin-top:2px}
+.mkt{margin:0 0 10px}
+.mkt h3{display:flex;align-items:baseline;gap:8px}
+.mkt h3 .sp{flex:1}
+.mkt h3 .more{font-size:11.5px;color:var(--mut);font-weight:400}
+.fallback{background:#171226;border:1px solid #3a2b52;color:#d8c6ff}
+
+/* ---------- liste de choix ---------- */
+.pick{display:flex;gap:9px;align-items:flex-start;padding:9px 0;border-top:1px solid #1a2029}
+.pick:first-child{border-top:0}
+.pick img{width:34px;height:34px;border-radius:50%;object-fit:cover;background:#0f1319;flex:0 0 auto}
+.pick .b{flex:1;min-width:0}
+.pick .t{display:flex;align-items:baseline;gap:7px}
+.pick .n{font-weight:650;font-size:13.5px}
+.pick .pr{margin-left:auto;font-weight:800;font-size:14px;letter-spacing:-.3px}
+.pick .st{font-size:10px;color:var(--gold);letter-spacing:-1px}
+.pick .why{font-size:12px;color:var(--mut);margin-top:3px;line-height:1.45}
+.pick .kv{font-size:11.5px;color:#7f8ca0;margin-top:3px}
+.mk{font-size:10.5px;letter-spacing:.11em;color:var(--mut);font-weight:700;margin:0 0 6px}
+.grid{display:grid;gap:10px}
+@media(min-width:760px){.g3{grid-template-columns:repeat(3,1fr)}}
+
+/* ---------- match ---------- */
+.match{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:13px;margin:0 0 11px}
+.match.pre{border-color:#2c2340}
+.mhead{display:flex;align-items:baseline;gap:8px;cursor:pointer}
+.mtitle{font-weight:700;font-size:14.5px;letter-spacing:-.2px}
+.mmeta{margin-left:auto;font-size:11.5px;color:var(--mut);white-space:nowrap}
+.gk{font-size:12px;color:var(--mut);margin:7px 0 10px;line-height:1.45}
+.gk b{color:var(--txt);font-weight:650}
+
+/* ---------- contexte / gardiens ---------- */
+.ctxgrid{display:grid;gap:10px}
+@media(min-width:760px){.ctxgrid{grid-template-columns:1fr 1fr}}
+.tside{background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:11px}
+.tside h4{margin:0 0 7px;font-size:13px}
+.row{display:flex;justify-content:space-between;gap:10px;font-size:12.5px;padding:3px 0}
+.row span:last-child{font-weight:650}
+select,input[type=text]{appearance:none;background:#0f1319;color:var(--txt);border:1px solid var(--line);
+  border-radius:9px;padding:8px 10px;font:inherit;font-size:13px;width:100%;min-height:38px}
+select:focus,input:focus{outline:2px solid #2b5f96;outline-offset:-1px}
+label.lb{display:block;font-size:11px;color:var(--mut);margin:0 0 4px;letter-spacing:.04em}
+
+/* ---------- tableau ---------- */
+.tw{overflow-x:auto;border-top:1px solid #1a2029;margin-top:8px}
+table{border-collapse:collapse;width:100%;font-size:12.5px}
+th,td{padding:7px 8px;text-align:left;white-space:nowrap;border-bottom:1px solid #181e26}
+th{color:var(--mut);font-weight:600;font-size:11px;cursor:pointer;position:sticky;top:0;background:var(--card)}
+tr:hover td{background:#141a22}
+td.n{text-align:right;font-variant-numeric:tabular-nums}
+.st{color:var(--gold);letter-spacing:-1px;font-size:11px}
+
+/* ---------- live ---------- */
+.lscore{display:flex;align-items:center;gap:10px;margin:4px 0 8px}
+.lscore .t{flex:1;font-size:14px;font-weight:650}
+.lscore .t.r{text-align:right}
+.lscore .s{font-size:30px;font-weight:800;letter-spacing:-1px;min-width:34px;text-align:center}
+.lstate{font-size:11px;color:var(--mut);text-align:center;margin-bottom:8px}
+.dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--bad);
+  margin-right:5px;vertical-align:1px;animation:bl 1.4s infinite}
+@keyframes bl{50%{opacity:.25}}
+.hit{color:var(--ok);font-weight:700}
+
+/* ---------- divers ---------- */
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.chip{font-size:12px;border:1px solid var(--line);border-radius:999px;padding:5px 10px;
+  background:#0f1319;cursor:pointer;min-height:30px}
+.chip.on{border-color:var(--bad);color:#ff9aa4;background:#1d1013}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:86px;z-index:40;
+  background:#1b222c;border:1px solid var(--line);border-radius:11px;padding:11px 15px;
+  font-size:13px;box-shadow:0 10px 30px rgba(0,0,0,.5);max-width:90vw}
+.kv2{display:flex;gap:12px;flex-wrap:wrap;font-size:11.5px;color:var(--mut);margin-top:6px}
+.bar{height:4px;border-radius:2px;background:#1c232c;overflow:hidden;margin-top:5px}
+.bar i{display:block;height:100%;background:var(--acc)}
+h2.sec{margin:22px 0 10px;font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:var(--mut)}
+</style>
+</head>
+<body>
+
+<header id="hdr">
+  <div class="brand">
+    <div class="logo">N</div>
+    <h1>NHL Pronos</h1>
+    <div class="sp"></div>
+    <button class="btn sm" id="bRefresh" title="Relancer la collecte et le moteur">
+      <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
+      <span id="bRefreshTx">Rafraîchir</span>
+    </button>
+  </div>
+  <div class="badges">
+    <span class="badge" id="bSeason">—</span>
+    <span class="badge" id="bMode">—</span>
+    <span class="badge" id="bAge">—</span>
+  </div>
+  <p id="hdrSub">Chargement…</p>
+</header>
+
+<main id="main"></main>
+<div class="foot" id="foot"></div>
+<nav id="nav"></nav>
+
+<script>
+"use strict";
+/* ============================ état ============================ */
+let PROXY="";
+const S={d:null,srv:null,statique:false,api:"",complets:{},tab:"podium",game:null,date:null,
+  mk:"pointeur",sort:{},ov:{},hidePre:false,live:null,liveAt:null,liveErr:null,
+  expand:false,search:""};
+const $=s=>document.querySelector(s);
+/* La page doit être servie par server.py. Ouverte en file://, rien ne peut
+   fonctionner : les appels réseau relatifs sont bloqués par le navigateur. */
+const SUR_HTTP=(typeof location==="undefined")||/^https?:$/.test(location.protocol||"");
+/* API = base du serveur Python quand la page n'est pas servie en http (file://).
+   PROXY = base du Worker Cloudflare, en hébergement statique, pour les deux
+   routes qui exigent un intermédiaire (/live et /refresh). Ce sont deux choses
+   différentes : le proxy ne sert PAS les fichiers du site. */
+let API=(typeof location!=="undefined"&&location.protocol==="file:")
+  ?"http://localhost:8000/":"";
+async function lireConfig(){
+  try{
+    const r=await fetch("config.json",{cache:"no-store"});
+    if(!r||!r.ok) return;
+    const c=await r.json();
+    if(c&&c.api){
+      PROXY=String(c.api).replace(/\/+$/,"")+"/";
+      S.api=PROXY;
+    }
+  }catch(e){ /* pas de config.json : on reste en mode local */ }
+}
+async function apiFetch(url,opt,ms){
+  const ctl=(typeof AbortController!=="undefined")?new AbortController():null;
+  const h=setTimeout(()=>{ if(ctl) ctl.abort(); },ms||20000);
+  try{
+    const r=await fetch(API+url,Object.assign({},opt,ctl?{signal:ctl.signal}:{}));
+    if(!r) throw new Error("réponse vide");
+    if(r.status<200||r.status>=300) throw new Error("réponse HTTP "+r.status);
+    return r;
+  }catch(e){
+    const m=(e&&e.name==="AbortError")?"délai dépassé (20 s)":((e&&e.message)||String(e));
+    throw new Error(url+" — "+m);
+  }finally{ clearTimeout(h); }
+}
+async function serverAlive(){
+  if(!SUR_HTTP) return {ok:false,pourquoi:"file"};
+  try{ const j=await apiFetch("api/health",null,6000).then(r=>r.json());
+       return {ok:!!(j&&j.ok),info:j}; }
+  catch(e){ return {ok:false,pourquoi:"reseau",erreur:String((e&&e.message)||e)}; }
+}
+function serverDiag(s){
+  if(s&&s.pourquoi==="file") return "Cette page est ouverte directement depuis le disque "
+    +"(file://). Le navigateur bloque alors tous les appels réseau. Sers l'app avec "
+    +"<code>python3 server.py 8000</code> puis ouvre <code>http://localhost:8000</code>.";
+  if(s&&s.pourquoi==="reseau") return "Le serveur ne répond pas ("+esc(s.erreur)
+    +"). Vérifie qu'il tourne : <code>cd nhl-pronos &amp;&amp; python3 server.py 8000</code>, "
+    +"puis recharge la page. Si tu passes par un proxy ou un aperçu distant, "
+    +"ouvre plutôt <code>http://localhost:8000</code> en direct.";
+  return "Serveur injoignable : relance <code>python3 server.py 8000</code>.";
+}
+async function chargerDonnees(){
+  S.d=await apiFetch("data/analyse.json",null,60000).then(r=>r.json());
+  S.date=S.d?(dates()[0]||S.date):S.date;
+  header(); render();
+  return S.d;
+}
+const el=(t,c,h)=>{const n=document.createElement(t);if(c)n.className=c;if(h!=null)n.innerHTML=h;return n;};
+const esc=s=>String(s??"").replace(/[&<>"]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]));
+const SEUIL=[0,0,50,62,75,88];
+const LABEL={1:"1 — très spéculatif",2:"2 — risqué",3:"3 — correct",4:"4 — solide",5:"5 — forte conviction"};
+const MKS=["buteur","passeur","pointeur"];
+const MKD={buteur:"marquer un but",passeur:"délivrer une passe",pointeur:"marquer ou passer"};
+const FRL={absent:"absent du dernier match",hors_echantillon:"forme non mesurée",
+  b2b:"back-to-back",tir_chaud:"% de tir intenable",tir_froid:"réussite froide",
+  pp_gonfle:"points gonflés par l'AN",echantillon:"petit échantillon",
+  manuel_absent:"absent (déclaré)",recrue:"recrue",en_hausse:"en hausse"};
+
+/* ============================ formatage ============================ */
+const lab=s=>s?String(s).slice(0,4)+"-"+String(s).slice(4):"—";
+const nbf=()=>S.d.games.reduce((a,g)=>a+g.players.length,0);
+const pcx=(x,d=1)=>x==null?"—":(x*100).toFixed(d).replace(".",",")+" %";
+const f1=x=>x==null?"—":Number(x).toFixed(1).replace(".",",");
+const f2=x=>x==null?"—":Number(x).toFixed(2).replace(".",",");
+const pcent=p=>Math.round(p*100)+" %";
+const etoiles=n=>"★".repeat(n)+"☆".repeat(5-n);
+const palier=c=>{for(let n=5;n>=1;n--) if(c>=SEUIL[n]) return n; return 1;};
+function dateFr(d){const j=new Date(d+"T12:00:00Z");
+  return j.toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"});}
+function dateCourte(d){const j=new Date(d+"T12:00:00Z");
+  return j.toLocaleDateString("fr-FR",{weekday:"short",day:"numeric",month:"short"});}
+function heureFr(u){return u?new Date(u).toLocaleTimeString("fr-FR",{hour:"2-digit",minute:"2-digit"}):"—";}
+function initiales(n){return String(n||"?").split(/\s+/).map(w=>w[0]).join("").slice(0,2).toUpperCase();}
+function age(txt){
+  const t=Date.parse(txt); if(isNaN(t)) return "—";
+  const m=Math.round((Date.now()-t)/60000);
+  if(m<2) return "à l'instant";
+  if(m<60) return "il y a "+m+" min";
+  const h=Math.round(m/60);
+  if(h<24) return "il y a "+h+" h";
+  return "il y a "+Math.round(h/24)+" j";
+}
+/* photo : si l'image ne charge pas, on met les initiales */
+function photo(n,src,cl){
+  if(src){
+    const i=el("img",cl||""); i.src=src; i.alt="";
+    i.onerror=()=>{const d=el("div",cl||"");d.textContent=initiales(n);
+      d.style.cssText="display:flex;align-items:center;justify-content:center;background:#0f1319;font-size:12px;color:#8896a8";
+      if(i.parentNode) i.parentNode.replaceChild(d,i);};
+    return i;
+  }
+  const d=el("div",cl||"");d.textContent=initiales(n);
+  d.style.cssText="display:flex;align-items:center;justify-content:center;background:#0f1319;font-size:12px;color:#8896a8";
+  return d;
+}
+
+/* ============================ chargement ============================ */
+async function boot(){
+  await lireConfig();
+  S.srv=await serverAlive();
+  try{ S.d=await apiFetch("data/analyse.json",null,60000).then(r=>r.json()); }
+  catch(e){
+    $("#main").innerHTML='<div class="card"><h2>Données absentes</h2>'
+      +'<p class="note">'+serverDiag(S.srv)+"</p>"
+      +'<p class="note">Si le serveur tourne déjà, lance <code>python3 fetch_pronos.py</code> '
+      +"puis <code>python3 engine.py</code>. Détail : "+esc(String((e&&e.message)||e))+"</p></div>";
+    return;
+  }
+  if(!S.d){
+    // données absentes : on explique, on ne s'effondre pas
+    $("#main").innerHTML='<div class="card"><h2>Données absentes</h2>'
+      +'<p class="note">Le fichier <code>data/analyse.json</code> est illisible ou absent. '
+      +"Vérifie que le dossier déposé contient bien le sous-dossier <code>data/</code> "
+      +"(produit par <code>python3 build_static.py</code>), ou relance "
+      +"<code>python3 fetch_pronos.py &amp;&amp; python3 engine.py</code> puis "
+      +"<code>python3 build_static.py</code>.</p></div>";
+    return;
+  }
+  try{ S.ov=JSON.parse(localStorage.getItem("nhlpronos.ov")||"{}"); }catch(e){ S.ov={}; }
+  // hébergement statique (Netlify Drop) : déclaré par build_static.py dans
+  // l'index. On ne le déduit PAS d'un serveur injoignable : dire « version
+  // statique » à quelqu'un dont le serveur est juste arrêté serait un mensonge.
+  S.statique=!!S.d.statique;
+  S.date=dates()[0]||null;
+  header(); nav(); render();
+  // rafraîchissement déjà en cours côté serveur ?
+  try{
+    const r=await apiFetch("api/refresh",null,6000).then(x=>x.json());
+    if(r&&r.running) watchRefresh();
+  }catch(e){}
+}
+function header(){
+  const L=S.d.league;
+  const b=$("#bRefresh");
+  if(b){
+    const tx=$("#bRefreshTx");
+    if(S.statique&&S.api){
+      if(tx) tx.textContent="Rafraîchir";
+      b.onclick=()=>refreshStatique();
+    }else if(S.statique){
+      if(tx) tx.textContent="Recharger";
+      b.onclick=()=>chargerDonnees().catch(e=>toast(String(e.message||e),5000));
+    }else{
+      if(tx) tx.textContent="Rafraîchir";
+      b.onclick=()=>refresh();
+    }
+  }
+  $("#bSeason").textContent="saison "+lab(S.d.activeSeason);
+  const bm=$("#bMode");
+  bm.textContent=S.d.currentSeasonStarted?"saison en cours":"base "+lab(S.d.refSeason)+" — saison non démarrée";
+  bm.className="badge"+(S.d.currentSeasonStarted?"":" w");
+  const a=age(S.d.generatedUtc), ba=$("#bAge");
+  ba.textContent="analyse "+a;
+  ba.className="badge"+(fresh()?"" :" f");
+  $("#hdrSub").innerHTML=S.d.games.length+" matchs à venir · "+nbf().toLocaleString("fr-FR")
+    +" analyses joueur · ARR % moyen "+pcx(L.savePctAvg)+" · "+f2(L.gaPerGame)+" but/match"
+    +" · efficacité de tir "+pcx(L.shootingPctAvg);
+}
+function fresh(){ return (Date.now()-Date.parse(S.d.generatedUtc))/3600000 < 12; }
+const dates=()=>[...new Set(S.d.games.map(g=>g.date))].sort();
+const gamesOf=d=>S.d.games.filter(g=>g.date===d&&(!S.hidePre||!g.preseason));
+
+/* ============================ overrides (localStorage) ============================ */
+function saveOv(){ try{localStorage.setItem("nhlpronos.ov",JSON.stringify(S.ov));}catch(e){} }
+function ovGame(id){ return S.ov[id]=S.ov[id]||{goalies:{},absents:[]}; }
+function isAbsent(id,pid){ return (S.ov[id]?.absents||[]).includes(pid); }
+function toggleAbsent(id,pid){
+  const o=ovGame(id), i=o.absents.indexOf(pid);
+  if(i<0) o.absents.push(pid); else o.absents.splice(i,1);
+  saveOv();
+}
+function toast(msg,ms){
+  const t=el("div","toast",esc(msg)); document.body.appendChild(t);
+  setTimeout(()=>{ if(t.parentNode) t.parentNode.removeChild(t); },ms||2600);
+}
+
+/* ============ moteur client (recalcul si gardien corrigé / absent) ============ */
+const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
+function effG(game){
+  const g={...game};
+  g.goalieOptions={away:goalieOptions(g,g.away),home:goalieOptions(g,g.home)};
+  g.players=game.players.map(p=>({...p,buteur:{...p.buteur},passeur:{...p.passeur},pointeur:{...p.pointeur},
+    flags:p.flags.slice(),raw:{...p.raw}}));
+  for(const side of ["away","home"]){
+    const me=g.ctx[side]={...g.ctx[side]}, opp=side==="away"?"home":"away";
+    const pid=S.ov[g.id]?.goalies?.[opp];
+    if(!pid) continue;
+    const gk=(g.goalieOptions?.[opp]||[]).find(x=>x.playerId===pid);
+    if(!gk||!gk.sv) continue;
+    const nouveau=clamp((1-gk.sv)/(1-S.d.league.savePctAvg),0.5,1.8);
+    me.goalieF=nouveau;
+    me.goalie={...(me.goalie||{}),name:gk.name,sv:gk.sv,gaa:gk.gaa,confirmed:true};
+    g.players.filter(p=>p.abbr===me.abbr).forEach(p=>{
+      const ng=p.lambdaSansGardien.g*nouveau;
+      const na=p.lambdaSansGardien.a*nouveau+2*0.30*ng;
+      p.buteur.lam=ng; p.passeur.lam=na; p.pointeur.lam=ng+na;
+      p.buteur.prob=1-Math.exp(-ng); p.passeur.prob=1-Math.exp(-na);
+      p.pointeur.prob=1-Math.exp(-(ng+na));
+      p.goalieF=nouveau; p.oppGoalie=gk.name;
+    });
+  }
+  g.players.forEach(p=>{
+    if(!isAbsent(g.id,p.id)) return;
+    if(!p.flags.includes("manuel_absent")) p.flags.push("manuel_absent");
+    p.buteur.prob*=0.30; p.passeur.prob*=0.30; p.pointeur.prob*=0.30;
+  });
+  for(const mk of MKS){
+    g.players.forEach(p=>{
+      p[mk].score=Math.round(100*p[mk].prob*10)/10;
+      if(p.recrue){
+        let c=p.recrue.confidence;
+        if(p.flags.includes("absent")||p.flags.includes("manuel_absent")) c=Math.round(c*0.40*10)/10;
+        p[mk].confidence=c; p[mk].palier=palier(c);
+      }else if(p[mk].score>0){
+        p[mk].confidence=Math.round(confiance(p[mk].prob,p.gp,p.flags,g.preseason)*10)/10;
+        p[mk].palier=palier(p[mk].confidence);
+      }else{
+        p[mk].confidence=0; p[mk].palier=1;
+      }
+      p[mk].etoiles=etoiles(p[mk].palier);
+    });
+    const r=g.players.filter(p=>p[mk].score>0)
+      .sort((a,b)=>b[mk].confidence-a[mk].confidence||b[mk].score-a[mk].score||a.name.localeCompare(b.name,"fr"));
+    r.forEach((p,i)=>p[mk].rank=i+1);
+    g.players.forEach(p=>{ if(!p[mk].rank) p[mk].rank=null; });
+  }
+  return g;
+}
+function confiance(prob,gp,flags,pre){
+  let c=100*Math.pow(Math.max(0,Math.min(1,prob)),0.55), d=100;
+  if(gp<20) d=42+58*(gp/20); else if(gp<45) d=82+18*((gp-20)/25);
+  if(flags.includes("absent")||flags.includes("manuel_absent")) d*=0.30;
+  else if(flags.includes("hors_echantillon")) d*=0.90;
+  if(flags.includes("echantillon")) d*=0.88;
+  if(flags.includes("b2b")) d*=0.93;
+  if(pre) d*=0.80;
+  return 0.80*c+0.20*d;
+}
+function goalieOptions(game,abbr){
+  const probable=(game.ctx.away.abbr===abbr?game.ctx.away.goalie:game.ctx.home.goalie)||{};
+  const base=(S.d.goalieList&&S.d.goalieList[abbr])||[];
+  const out=[], seen=new Set();
+  const add=gk=>{ if(gk&&gk.playerId&&!seen.has(gk.playerId)){seen.add(gk.playerId);out.push(gk);} };
+  add(probable.playerId?{...probable}:null);
+  base.forEach(add);
+  return out;
+}
+
+/* ============================ rafraîchir ============================ */
+async function refresh(){
+  const st=await serverAlive();
+  S.srv=st;
+  if(!st.ok){
+    const m=$("#main");
+    if(m){ m.innerHTML=""; m.appendChild(el("div","card","<h2>Rafraîchissement impossible</h2>"
+      +'<p class="note">'+serverDiag(st)+"</p>")); }
+    toast("Serveur injoignable — voir le détail à l'écran",5000);
+    return;
+  }
+  let j=null;
+  try{
+    // GET et non POST : certains proxys d'aperçu refusent POST
+    j=await apiFetch("api/refresh?lancer=1",null,30000).then(x=>x.json());
+  }catch(e){
+    const m=$("#main");
+    if(m){ m.innerHTML=""; m.appendChild(el("div","card","<h2>Le serveur a refusé</h2>"
+      +'<p class="note">'+esc(String((e&&e.message)||e))
+      +". Si tu passes par un aperçu distant, ouvre <code>http://localhost:8000</code> "
+      +"en direct, ou relance la collecte toi-même : "
+      +"<code>python3 fetch_pronos.py &amp;&amp; python3 engine.py</code>.</p>")); }
+    return;
+  }
+  if(j&&j.etat==="deja_en_cours"){ toast("Un rafraîchissement est déjà en cours."); watchRefresh(); return; }
+  if(j&&j.etat==="termine"){ toast("Rien à relancer : analyse de "+age(S.d.generatedUtc)); return; }
+  toast("Collecte des stats en cours… (~80 s)");
+  watchRefresh();
+}
+/* Statique + proxy : on demande à GitHub Actions de régénérer le dépôt, puis on
+   recharge. La collecte prend 2 à 3 minutes : on prévient, on n'attend pas. */
+async function refreshStatique(){
+  const avant=S.d?S.d.generatedUtc:null;
+  let j=null;
+  try{
+    j=await apiFetch(PROXY+"refresh",null,20000).then(r=>r.json());
+  }catch(e){
+    toast("Proxy injoignable : "+String((e&&e.message)||e),6000);
+    return;
+  }
+  if(j&&j.error){ toast("Refusé : "+j.error,6000); return; }
+  toast(j&&j.detail?j.detail:"Régénération lancée — compte 2 à 3 minutes.",7000);
+  const b=$("#bRefresh"), tx=$("#bRefreshTx");
+  if(tx) tx.textContent="En cours…";
+  for(let i=0;i<40;i++){
+    await new Promise(r=>setTimeout(r,15000));
+    try{ await chargerDonnees(); }catch(e){ continue; }
+    if(S.d&&S.d.generatedUtc!==avant){
+      if(tx) tx.textContent="Rafraîchir";
+      toast("Données mises à jour : "+age(S.d.generatedUtc));
+      return;
+    }
+  }
+  if(tx) tx.textContent="Rafraîchir";
+  toast("Toujours pas de nouvelles données après 10 min — voir l'onglet Actions de ton dépôt.",9000);
+}
+
+async function watchRefresh(){
+  const tx=$("#bRefreshTx");
+  const fin=etat=>{ if(tx) tx.textContent=etat; };
+  fin("En cours…");
+  try{
+  for(let i=0;i<120;i++){
+    await new Promise(r=>setTimeout(r,3000));
+    let j=null;
+    try{ j=await apiFetch("api/refresh",null,8000).then(x=>x.json()); }catch(e){ break; }
+    if(!j||!j.running){
+      fin("Rafraîchir");
+      if(j&&j.ok===false){ toast("Échec : "+((j.log||[]).slice(-1)[0]||"?"),6000); }
+      else{
+        try{ await chargerDonnees(); toast("Analyse mise à jour "+age(S.d.generatedUtc)+"."); }
+        catch(e){ toast("Analyse terminée mais rechargement impossible : "+e.message,6000); render(); }
+      }
+      return;
+    }
+  }
+  fin("Rafraîchir");
+  }catch(e){ fin("Rafraîchir"); toast("Suivi du rafraîchissement interrompu : "+e.message,5000); }
+}
+
+/* ============================ navigation ============================ */
+const ICO={
+  podium:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21V13h5v8"/><path d="M10 21V7h4v14"/><path d="M17 21v-6h4v6"/></svg>',
+  matchs:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M8 3v4M16 3v4M3 11h18"/></svg>',
+  detail:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5M8 11h6M11 8v6"/></svg>',
+  live:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s7-5.3 7-11a7 7 0 1 0-14 0c0 5.7 7 11 7 11z"/><circle cx="12" cy="10" r="2.6"/></svg>',
+  methode:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 16v-5M12 8h.01"/></svg>'};
+const TABS=[["podium","Podium"],["matchs","Matchs"],["detail","Analyse"],["live","Live"],["methode","Méthode"]];
+function nav(){
+  const n=$("#nav"); n.innerHTML="";
+  TABS.forEach(([id,l])=>{
+    const b=el("button",id===S.tab?"on":"");
+    b.innerHTML=(ICO[id]||"")+"<span>"+esc(l)+"</span>";
+    b.onclick=()=>{S.tab=id;nav();render();if(window.scrollTo)window.scrollTo(0,0);};
+    n.appendChild(b);
+  });
+}
+function render(){
+  const m=$("#main"); m.innerHTML="";
+  if(S.tab==="podium") rPodium(m);
+  else if(S.tab==="matchs") rMatchs(m);
+  else if(S.tab==="detail") rDetail(m);
+  else if(S.tab==="live") rLive(m);
+  else rMethode(m);
+  $("#foot").innerHTML="Sources : <code>api.nhle.com/stats/rest/en</code> (stats officielles) et "
+    +"<code>api-web.nhle.com/v1</code> (calendrier, effectifs, gardiens, scores). "
+    +"Aucune cote : classement 100 % statistique. Généré le "+esc(S.d.generatedUtc)+".";
+}
+const goDetail=id=>{S.game=id;S.tab="detail";nav();render();if(window.scrollTo)window.scrollTo(0,0);};
+
+/* ============================ sélecteur de jour ============================ */
+function dayPicker(m){
+  const ds=dates();
+  const c=el("div","ctl");
+  const prev=el("button","btn sm","‹");
+  prev.onclick=()=>{const i=ds.indexOf(S.date);if(i>0){S.date=ds[i-1];render();}};
+  const next=el("button","btn sm","›");
+  next.onclick=()=>{const i=ds.indexOf(S.date);if(i<ds.length-1){S.date=ds[i+1];render();}};
+  const sel=el("select");
+  sel.style.width="auto";sel.style.flex="1";sel.style.minWidth="150px";
+  ds.forEach(d=>{const o=el("option",null,dateCourte(d)+" — "+gamesOf(d).length+" match(s)");
+    o.value=d;if(d===S.date)o.selected=true;sel.appendChild(o);});
+  sel.onchange=()=>{S.date=sel.value;render();};
+  const t=el("button","btn sm"+(S.hidePre?" on":""),S.hidePre?"Présaison masquée":"Présaison incluse");
+  t.onclick=()=>{S.hidePre=!S.hidePre;render();};
+  c.appendChild(prev);c.appendChild(sel);c.appendChild(next);c.appendChild(t);
+  m.appendChild(c);
+  return gamesOf(S.date);
+}
+
+/* ============================ onglet 1 : podium ============================ */
+function podiumJour(games){
+  const all=[];
+  games.forEach(g=>{const e=effG(g);all.push({g,e});});
+  const out={};
+  MKS.forEach(mk=>{
+    const rows=[];
+    all.forEach(({g,e})=>{
+      e.players.forEach(p=>{ if(p[mk].score>0) rows.push({p,g,e,mk}); });
+    });
+    rows.sort((a,b)=>b.p[mk].confidence-a.p[mk].confidence||b.p[mk].score-a.p[mk].score
+      ||a.p.name.localeCompare(b.p.name,"fr"));
+    // un joueur qui joue 2 fois dans la journée n'apparaît qu'une fois sur le podium
+    const vus=new Set(), top=[];
+    rows.forEach(r=>{ if(vus.has(r.p.id)) return; vus.add(r.p.id); top.push(r); });
+    out[mk]=top.slice(0,3);
+  });
+  return out;
+}
+function rPodium(m){
+  const games=dayPicker(m);
+  if(!games.length){ m.appendChild(el("div","card",'<p class="note">Aucun match ce jour-là.</p>')); return; }
+  m.appendChild(el("div","day",dateFr(S.date)));
+  if(games.every(g=>g.preseason)){
+    m.appendChild(el("div","card fallback",'<p class="note"><b>Présaison.</b> Temps de glace et '
+      +"alignements non représentatifs : les probabilités ci-dessous sont très fragiles. "
+      +"Attendez la saison régulière pour vous y fier.</p></div>"));
+  }
+  if(S.statique&&S.api){
+    m.appendChild(el("div","card",'<p class="note"><b>Proxy actif</b> ('+esc(S.api)
+      +") : le suivi en direct et le bouton Rafraîchir fonctionnent. Le rafraîchissement "
+      +"passe par GitHub Actions et prend 2 à 3 minutes.</p></div>"));
+  }
+  if(S.statique){
+    m.appendChild(el("div","card fallback",'<p class="note"><b>Version statique.</b> '
+      +"Les données ont été figées le "+esc(S.d.generatedUtc.replace("T"," ").replace("Z"," UTC"))
+      +". Le bouton <b>Recharger</b> relit ce dépôt, il ne peut pas relancer la collecte : "
+      +"pour des stats plus fraîches, régénère le dossier avec "
+      +"<code>python3 refresh.py &amp;&amp; python3 build_static.py</code> et redépose-le.</p></div>"));
+  }
+  if(!fresh()){
+    m.appendChild(el("div","card fallback",'<p class="note">Analyse de '+age(S.d.generatedUtc)
+      +'. Les gardiens partants ont pu changer : appuyez sur <b>Rafraîchir</b> en haut, '
+      +"ou corrigez le gardien dans l'onglet Analyse.</p></div>"));
+  }
+  const pd=podiumJour(games);
+  MKS.forEach(mk=>{
+    const box=el("div","card mkt");
+    const h=el("h3");
+    h.innerHTML="<span>"+mk.toUpperCase()+"</span><span class='sp'></span>"
+      +"<span class='more'>le plus probable pour "+esc(MKD[mk])+"</span>";
+    box.appendChild(h);
+    const rows=pd[mk];
+    if(!rows.length){ box.appendChild(el("p","note","Aucun joueur classé.")); m.appendChild(box); return; }
+    const pod=el("div","podium");
+    rows.forEach(({p,g},i)=>{
+      const d=el("div","pod r"+(i+1));
+      d.appendChild(el("div","rk","#"+(i+1)));
+      d.appendChild(photo(p.name,p.headshot,""));
+      d.appendChild(el("div","nm",esc(p.name)));
+      d.appendChild(el("div","tm",esc(p.abbr)+" · "+esc(g.awayNameFr||"")+" / "+esc(g.homeNameFr||"")));
+      d.appendChild(el("div","pc",pcent(p[mk].prob)));
+      d.appendChild(el("div","st",p[mk].etoiles));
+      d.appendChild(el("div","mt",p.recrue?"recrue":(f1(p.perGame[({buteur:"g",passeur:"a",pointeur:"pts"})[mk]])+" /match")));
+      d.onclick=()=>{S.game=g.id;S.tab="detail";nav();render();};
+      pod.appendChild(d);
+    });
+    box.appendChild(pod);
+    const w=el("div","why","");
+    w.innerHTML='<div class="kv">'+esc(court(rows[0].p,mk))+"</div>";
+    box.appendChild(w);
+    const more=el("button","btn sm gh","Voir le match — "+esc(rows[0].g.awayNameFr||rows[0].g.away)+" @ "+esc(rows[0].g.homeNameFr||rows[0].g.home));
+    more.style.marginTop="9px";
+    more.onclick=()=>goDetail(rows[0].g.id);
+    box.appendChild(more);
+    m.appendChild(box);
+  });
+  m.appendChild(el("h2","sec","Les "+games.length+" match(s) du jour"));
+  games.forEach(g=>m.appendChild(carte(g,3)));
+}
+
+/* ============================ onglet 2 : matchs ============================ */
+function rMatchs(m){
+  const games=dayPicker(m);
+  if(!games.length){ m.appendChild(el("div","card",'<p class="note">Aucun match ce jour-là.</p>')); return; }
+  m.appendChild(el("div","day",dateFr(S.date)));
+  games.forEach(g=>m.appendChild(carte(g,S.expand?5:3)));
+  const b=el("button","btn",S.expand?"Revenir au top 3":"Afficher le top 5 par marché");
+  b.onclick=()=>{S.expand=!S.expand;render();};
+  m.appendChild(b);
+}
+function carte(g0,n){
+  const g=effG(g0);
+  const c=el("div","match"+(g.preseason?" pre":""));
+  const h=el("div","mhead");
+  const ti=el("div","mtitle",esc(g.awayNameFr||g.away)+' <span class="mut">@</span> '+esc(g.homeNameFr||g.home));
+  ti.onclick=()=>goDetail(g0.id);
+  h.appendChild(ti);
+  h.appendChild(el("div","mmeta",heureFr(g.startUtc)+(g.preseason?' <span class="pill pre">présaison</span>':"")));
+  c.appendChild(h);
+  const ga=g.ctx.away.goalie, gh=g.ctx.home.goalie;
+  c.appendChild(el("div","gk",'Gardiens probables : <b>'+esc(gh?.name||"?")+"</b> ("+pcx(gh?.sv)+") pour "
+    +esc(g.home)+' · <b>'+esc(ga?.name||"?")+"</b> ("+pcx(ga?.sv)+") pour "+esc(g.away)
+    +' <span class="pill">estimé</span>'));
+  const gr=el("div","grid g3");
+  MKS.forEach(mk=>{
+    const box=el("div");
+    box.appendChild(el("div","mk",mk.toUpperCase()));
+    const list=g.players.filter(p=>p[mk].rank&&p[mk].rank<=n).sort((a,b)=>a[mk].rank-b[mk].rank);
+    if(!list.length){ box.appendChild(el("div","mut","—")); gr.appendChild(box); return; }
+    list.forEach(p=>box.appendChild(ligne(p,g,mk,false)));
+    gr.appendChild(box);
+  });
+  c.appendChild(gr);
+  return c;
+}
+function ligne(p,g,mk,detail){
+  const d=el("div","pick");
+  d.appendChild(photo(p.name,p.headshot,""));
+  const b=el("div","b");
+  const t=el("div","t");
+  t.innerHTML='<span class="st">'+p[mk].etoiles+'</span> <span class="n">'+esc(p.name)+'</span> '
+    +'<span class="pill">'+esc(p.abbr)+'</span>'+(p.recrue?' <span class="pill n">recrue</span>':"")
+    +'<span class="pr">'+pcent(p[mk].prob)+"</span>";
+  b.appendChild(t);
+  b.appendChild(el("div","kv",court(p,mk)));
+  if(detail) b.appendChild(el("div","why",esc(p[mk].why)));
+  d.appendChild(b);
+  return d;
+}
+function court(p,mk){
+  const r=p.raw, bits=[];
+  if(p.recrue) bits.push("recrue "+p.recrue.ligue);
+  else if(r.toiMin) bits.push("TGL "+f1(r.toiMin)+" min");
+  bits.push(f1(p.perGame.sh)+" tir/match");
+  const v=p.perGame[mk==="buteur"?"g":mk==="passeur"?"a":"pts"];
+  bits.push(f2(v)+" "+(mk==="buteur"?"but":mk==="passeur"?"passe":"point")+"/match");
+  if(p.form&&p.form.n) bits.push(f2(p.form.pts)+" pt sur "+p.form.n);
+  if(p.h2h&&p.h2h.n>=2) bits.push(p.h2h.n+" duels vs "+p.opp+" : "+f2(p.h2h.pts)+" pt");
+  const out=[];
+  if(p.oppGoalie) out.push("vs "+p.oppGoalie);
+  return bits.filter(x=>x&&x!=="—").slice(0,5).join(" · ")
+    +(out.length?" · "+out.join(" · "):"")+(p.milestones&&p.milestones.pts&&p.milestones.pts.gap
+      &&p.milestones.pts.gap>0&&p.milestones.pts.gap<=6
+      ?" · objectif "+p.milestones.pts.next+" pts":"");
+}
+
+/* ============================ onglet 3 : analyse d'un match ============================ */
+/* L'index ne contient que les 10 premiers de chaque marché : la fiche complète
+   (tous les joueurs + justifications détaillées) est chargée à la demande. */
+async function jeuComplet(id){
+  if(S.complets[id]) return S.complets[id];
+  const g=await apiFetch("data/match-"+id+".json",null,45000).then(r=>r.json());
+  S.complets[id]=g;
+  return g;
+}
+async function rDetail(m){
+  if(!S.game){ const ds=dates(); const gg=S.d.games.find(g=>g.date===(S.date||ds[0]))||S.d.games[0]; S.game=gg.id; }
+  const g0=S.d.games.find(g=>g.id===S.game)||S.d.games[0];
+  if(!S.complets[g0.id]){
+    m.appendChild(el("div","card",'<p class="note">Chargement de la fiche complète du match…</p>'));
+    try{ await jeuComplet(g0.id); }
+    catch(e){
+      m.innerHTML="";
+      m.appendChild(el("div","card","<h2>Fiche complète indisponible</h2>"
+        +'<p class="note">'+esc(String((e&&e.message)||e))
+        +". Vérifie que le dossier <code>data/</code> contient bien "
+        +"<code>match-"+esc(g0.id)+".json</code> (produit par "
+        +"<code>python3 build_static.py</code>).</p>"));
+      return;
+    }
+    if(S.game===g0.id&&S.tab==="detail") render();
+    return;
+  }
+  const g=effG(S.complets[g0.id]);
+
+  const sel=el("select");
+  S.d.games.forEach(x=>{const o=el("option",null,x.date+" — "+(x.awayNameFr||x.away)+" @ "+(x.homeNameFr||x.home));
+    o.value=x.id; if(x.id===g.id)o.selected=true; sel.appendChild(o);});
+  sel.onchange=()=>{S.game=Number(sel.value)||sel.value;render();};
+  const c0=el("div","ctl"); c0.appendChild(sel); m.appendChild(c0);
+
+  const head=el("div","card");
+  head.innerHTML='<h2>'+esc(g.awayNameFr||g.away)+' <span class="mut">@</span> '+esc(g.homeNameFr||g.home)+"</h2>"
+    +'<p class="note">'+esc(dateFr(g.date))+" · "+heureFr(g.startUtc)+(g.venue?" · "+esc(g.venue):"")
+    +(g.preseason?' · <span class="pill pre">présaison — lecture fragile</span>':"")+"</p>";
+  const ra=el("button","btn pri",'Ré-analyser ce match');
+  ra.style.marginTop="10px";
+  ra.onclick=()=>{refresh();};
+  head.appendChild(ra);
+  head.appendChild(el("div","kv2",'<span>Analyse de '+age(S.d.generatedUtc)+"</span>"
+    +"<span>Gardiens = estimation (4 derniers matchs)</span>"
+    +"<span>Les compos officielles ne sont pas publiées avant le match</span>"));
+  m.appendChild(head);
+
+  /* --- contexte + gardien --- */
+  const cg=el("div","ctxgrid");
+  ["away","home"].forEach(side=>{
+    const me=g.ctx[side], opp=side==="away"?"home":"away";
+    const box=el("div","tside");
+    box.appendChild(el("h4",esc(me.nameFr||me.abbr)));
+    const ovId=S.ov[g.id]?.goalies?.[opp];
+    const cur=(g.goalieOptions[opp]||[]).find(x=>x.playerId===ovId)||me.goalie||{};
+    [["Buts concédés/match",f2(me.oppGa)],["Tirs concédés/match",f1(me.oppSa)],
+     ["Avantage numérique",pcx(me.ppPct)],["Désavantage",pcx(me.pkPct)],
+     ["Gardien adverse",cur.name||"—"],["ARR %",pcx(cur.sv)],["MOY",f2(cur.gaa)],
+     ["Facteur gardien","× "+f2(me.goalieF)],["Facteur défense","× "+f2(me.defF)],
+     ["Back-to-back",me.b2b?"oui":"non"]].forEach(([k,v])=>{
+      const r=el("div","row"); r.innerHTML="<span>"+esc(k)+"</span><span>"+esc(v)+"</span>"; box.appendChild(r);
+    });
+    box.appendChild(el("label","lb",'Gardien réellement aligné en face — corrigez ici'));
+    const s2=el("select");
+    const opts=g.goalieOptions[opp]||[];
+    const o0=el("option",null,"(automatique — "+((me.goalie||{}).name||"?")+")"); o0.value=""; s2.appendChild(o0);
+    opts.forEach(gk=>{const o=el("option",null,gk.name+" — "+pcx(gk.sv)+", "+f2(gk.gaa)+" MOY, "+gk.gp+" MJ");
+      o.value=gk.playerId; if(gk.playerId===(cur.playerId)) o.selected=true; s2.appendChild(o);});
+    s2.onchange=()=>{
+      const o=ovGame(g.id); o.goalies=o.goalies||{};
+      if(s2.value) o.goalies[opp]=Number(s2.value); else delete o.goalies[opp];
+      saveOv(); render();
+    };
+    box.appendChild(s2);
+    if(ovId) box.appendChild(el("div","kv2",'<span class="pill g">gardien confirmé par vous</span>'));
+    cg.appendChild(box);
+  });
+  m.appendChild(cg);
+
+  /* --- absences --- */
+  const ab=el("div","card");
+  ab.appendChild(el("h2","Absences"));
+  ab.appendChild(el("p","note","Un pari est annulé si le joueur ne joue pas. Déclarez ici un joueur "
+    +"dont vous savez qu'il est absent : son indice s'effondre et le classement se recalcule."));
+  const inp=el("input"); inp.type="text"; inp.placeholder="Rechercher un joueur…"; inp.value=S.search;
+  inp.oninput=()=>{S.search=inp.value;listAb();};
+  ab.appendChild(inp);
+  const box=el("div","chips"); ab.appendChild(box);
+  const declared=g.players.filter(p=>isAbsent(g.id,p.id));
+  const info=el("div","kv2"); ab.appendChild(info);
+  function listAb(){
+    box.innerHTML="";
+    const q=S.search.trim().toLowerCase();
+    g.players.filter(p=>!q||p.name.toLowerCase().includes(q))
+      .sort((a,b)=>a.name.localeCompare(b.name,"fr")).slice(0,26).forEach(p=>{
+        const c=el("button","chip"+(isAbsent(g.id,p.id)?" on":""),esc(p.name)+" · "+esc(p.abbr));
+        c.onclick=()=>{toggleAbsent(g.id,p.id);render();};
+        box.appendChild(c);
+      });
+    info.innerHTML=declared.length?"<span class='pill r'>"+declared.length+" absent(s) déclaré(s)</span>":"<span>Aucun absent déclaré</span>";
+  }
+  listAb();
+  m.appendChild(ab);
+
+  /* --- les 3 choix --- */
+  m.appendChild(el("h2","sec","Le choix par marché"));
+  const gr=el("div","grid g3");
+  MKS.forEach(mk=>{
+    const box=el("div","card");
+    box.appendChild(el("div","mk",mk.toUpperCase()));
+    const list=g.players.filter(p=>p[mk].rank&&p[mk].rank<=5).sort((a,b)=>a[mk].rank-b[mk].rank);
+    if(!list.length) box.appendChild(el("p","note","Aucun joueur classé."));
+    list.forEach((p,i)=>{
+      const d=ligne(p,g,mk,i===0);
+      box.appendChild(d);
+      if(i===0){
+        const bar=el("div","bar"); const i2=el("i");
+        i2.style.width=Math.min(100,p[mk].confidence)+"%"; bar.appendChild(i2); box.appendChild(bar);
+        box.appendChild(el("div","kv2","<span>Indice "+f1(p[mk].confidence)+"/100 — palier "+p[mk].palier
+          +" ("+LABEL[p[mk].palier]+")</span>"));
+      }
+    });
+    gr.appendChild(box);
+  });
+  m.appendChild(gr);
+
+  /* --- tableau complet --- */
+  m.appendChild(el("h2","sec","Tous les joueurs ("+g.players.length+")"));
+  const ctl=el("div","ctl");
+  const fi=el("input"); fi.type="text"; fi.placeholder="Filtrer…"; fi.style.width="auto"; fi.style.flex="1";
+  const fs=el("select"); fs.style.width="auto";
+  ["Tous les joueurs","Seulement classés","Seulement les recrues"].forEach(t=>fs.appendChild(el("option",null,t)));
+  const csv=el("button","btn sm","Exporter CSV");
+  csv.onclick=()=>exportCsv(g);
+  ctl.appendChild(fi);ctl.appendChild(fs);ctl.appendChild(csv);
+  m.appendChild(ctl);
+  const wrap=el("div","tw"); const tb=el("table"); wrap.appendChild(tb); m.appendChild(wrap);
+  const COLS=[["name","Joueur"],["pos","P"],["gp","MJ"],["toi","TGL"],["sh","Tir/M"],
+    ["pts","Pt/M"],["form","5 dern."],["prob","Prob."],["conf","Indice"],["pal","Palier"]];
+  function draw(){
+    const q=fi.value.trim().toLowerCase();
+    const mode=fs.selectedIndex;
+    let rows=g.players.filter(p=>!q||p.name.toLowerCase().includes(q));
+    if(mode===1) rows=rows.filter(p=>p[S.mk].rank);
+    if(mode===2) rows=rows.filter(p=>!!p.recrue);
+    const key=S.sort.k||"conf", dir=S.sort.d||-1;
+    const val=p=>({name:p.name,pos:p.pos||"",gp:p.gp||0,toi:p.raw.toiMin||0,sh:p.perGame.sh,
+      pts:p.perGame.pts,form:p.form?p.form.pts:0,prob:p[S.mk].prob,conf:p[S.mk].confidence,
+      pal:p[S.mk].palier})[key];
+    rows.sort((a,b)=>{const x=val(a),y=val(b);
+      if(typeof x==="string") return dir*String(x).localeCompare(String(y),"fr");
+      return dir*((x||0)-(y||0));});
+    tb.innerHTML="<thead><tr>"+COLS.map(([k,l])=>"<th>"+esc(l)+"</th>").join("")+"</tr></thead><tbody>"
+      +rows.map(p=>"<tr><td>"+esc(p.name)+" <span class='pill'>"+esc(p.abbr)+"</span>"
+        +(p.recrue?" <span class='pill n'>recrue</span>":"")+"</td><td>"+esc(p.pos||"—")+"</td>"
+        +"<td class='n'>"+(p.gp||0)+"</td><td class='n'>"+f1(p.raw.toiMin)+"</td>"
+        +"<td class='n'>"+f1(p.perGame.sh)+"</td><td class='n'>"+f2(p.perGame.pts)+"</td>"
+        +"<td class='n'>"+f2(p.form?p.form.pts:null)+"</td>"
+        +"<td class='n'>"+pcent(p[S.mk].prob)+"</td><td class='n'>"+f1(p[S.mk].confidence)+"</td>"
+        +"<td class='st'>"+p[S.mk].etoiles+"</td></tr>").join("")+"</tbody>";
+      }
+  fi.oninput=draw; fs.onchange=draw;
+  MKS.forEach(()=>{});
+  const mkSel=el("select"); mkSel.style.width="auto"; mkSel.style.marginBottom="8px";
+  MKS.forEach(k=>{const o=el("option",null,k);o.value=k;if(k===S.mk)o.selected=true;mkSel.appendChild(o);});
+  mkSel.onchange=()=>{S.mk=mkSel.value;draw();};
+  m.insertBefore(mkSel,wrap);
+  draw();
+}
+function exportCsv(g){
+  const head=["joueur","equipe","pos","marche","rang","probabilite","indice","palier","lambda","justification"];
+  const rows=[];
+  g.players.forEach(p=>MKS.forEach(mk=>{
+    if(!p[mk].rank) return;
+    rows.push([p.name,p.abbr,p.pos,mk,p[mk].rank,p[mk].prob,p[mk].confidence,p[mk].palier,
+      p[mk].lam,String(p[mk].why).replace(/[\n;]/g," ")]);
+  }));
+  const csv=[head].concat(rows).map(r=>r.map(x=>'"'+String(x??"").replace(/"/g,'""')+'"').join(";")).join("\n");
+  try{
+    const url=URL.createObjectURL(new Blob(["\ufeff"+csv],{type:"text/csv;charset=utf-8"}));
+    const a=el("a"); a.href=url; a.download="nhl-pronos-"+g.id+".csv";
+    document.body.appendChild(a); if(a.click) a.click();
+  }catch(e){ toast("Export impossible dans ce navigateur"); }
+}
+
+/* ============================ onglet 4 : live ============================ */
+function liveDate(){
+  const ds=dates();
+  const auj=new Date().toISOString().slice(0,10);
+  if(ds.includes(auj)) return auj;
+  let best=null;
+  ds.forEach(d=>{ if(d<=auj) best=d; });
+  return best||ds[0];
+}
+async function rLive(m){
+  if(S.statique&&!S.api){
+    m.appendChild(el("div","card","<h2>Suivi en direct</h2>"
+      +'<p class="note">Indisponible sur un hébergement statique : l\'API officielle NHL '
+      +"refuse les appels directs depuis un navigateur (CORS), il faut un petit serveur "
+      +"intermédiaire. Cette version est un dépôt de fichiers.</p>"
+      +'<p class="note">Pour l\'avoir, deux voies : <b>gratuite</b>, ajoute le petit proxy '
+      +"de <code>FREE.md</code> (Cloudflare Worker) puis dépose le fichier "
+      +"<code>config.json</code> à la racine du site ; ou <b>chez toi</b>, lance "
+      +"<code>python3 server.py 8000</code> et ouvre <code>http://localhost:8000</code> "
+      +"(voir <code>DEPLOY.md</code>, rien d\'exposé sur Internet).</p>"
+      +'<p class="note">Tout le reste fonctionne ici : podiums, analyses, correction du '
+      +"gardien, absences, export CSV.</p>"));
+    return;
+  }
+  const d=liveDate();
+  const head=el("div","card");
+  head.innerHTML="<h2>Suivi en direct — "+esc(dateFr(d))+"</h2>"
+    +'<p class="note">Scores, période et horloge repris de l\'API officielle NHL, '
+    +"et pour chaque match les choix de l'app avec les buts déjà inscrits. "
+    +"Mise à jour toutes les 20 secondes.</p>";
+  const c=el("div","ctl");
+  const b=el("button","btn sm pri","Actualiser maintenant");
+  b.onclick=()=>loadLive(d,true);
+  const sp=el("span","mut",""); sp.id="liveStamp";
+  c.appendChild(b);c.appendChild(sp);
+  head.appendChild(c);
+  m.appendChild(head);
+  const box=el("div"); box.id="liveBox"; m.appendChild(box);
+  await loadLive(d,false,box);
+}
+async function loadLive(date,force,box){
+  const b=box||($("#liveBox")||null);
+  if(!force&&S.live&&Date.now()-S.liveAt<15000){ if(b) paintLive(b); return; }
+  try{
+    const chemin=S.api?(PROXY+"live?date="+date):("api/live?date="+date);
+    const r=await apiFetch(chemin,null,15000);
+    S.live=await r.json(); S.liveErr=null; S.liveAt=Date.now();
+  }catch(e){ S.liveErr=(e&&e.message)||"erreur"; }
+  if(b) paintLive(b);
+  if(S.tab==="live"&&!S.liveErr) setTimeout(()=>{ if(S.tab==="live") loadLive(date,true); },20000);
+}
+function scorersOf(t){
+  /* l'API range les buteurs sous plusieurs clés selon la version : on les ramasse toutes */
+  const out=[];
+  Object.keys(t||{}).forEach(k=>{
+    const v=t[k];
+    if(Array.isArray(v)) v.forEach(x=>{ if(x&&x.playerId) out.push(x); });
+  });
+  if(t&&t.scorers&&Array.isArray(t.scorers)) t.scorers.forEach(x=>out.push(x));
+  return out;
+}
+function paintLive(b){
+  b.innerHTML="";
+  const st=$("#liveStamp"); if(st) st.textContent=S.liveAt?"relevé "+age(new Date(S.liveAt).toISOString()):"";
+  if(S.liveErr){
+    b.appendChild(el("div","card",'<p class="note">Live indisponible : '+esc(S.liveErr)
+      +". Il faut un proxy : soit <code>python3 server.py 8000</code> en local, soit le "
+      +"Worker Cloudflare de <code>FREE.md</code> (l'API NHL bloque les appels directs "
+      +"depuis un navigateur).</p>"));
+    return;
+  }
+  if(!S.live){ b.appendChild(el("div","card",'<p class="note">Chargement…</p>')); return; }
+  const games=(S.live.games||[]);
+  if(!games.length){ b.appendChild(el("div","card",'<p class="note">Aucun match ce jour-là.</p>')); return; }
+  const ls=S.live.lastScorer;
+  if(ls&&ls.playerName){
+    b.appendChild(el("div","card",'<p class="note"><b>Dernier but :</b> '+esc(ls.playerName)
+      +" ("+esc((ls.team&&ls.team.abbrev)||"")+") — "+esc(ls.timeInPeriod||"")+" P"+esc(ls.period||"")+"</p>"));
+  }
+  games.forEach(lg=>{
+    const mine=S.d.games.find(x=>String(x.id)===String(lg.id));
+    const c=el("div","card");
+    const at=lg.awayTeam||{}, ht=lg.homeTeam||{};
+    const live=lg.gameState==="LIVE", fin=lg.gameState==="OFF"||lg.gameState==="FINAL";
+    const sc=el("div","lscore");
+    sc.innerHTML='<div class="t r">'+esc(at.abbrev||"")+'</div><div class="s num">'
+      +String(at.score??"—")+"</div>";
+    const mid=el("div","");
+    mid.innerHTML='<div class="lstate">'+(live?'<span class="dot"></span>EN DIRECT · P'
+      +esc(lg.period||"")+" "+esc(lg.clock||"")+(lg.inIntermission?" · pause":"")
+      :fin?"TERMINÉ":"À VENIR · "+heureFr(lg.startTimeUTC))+"</div>";
+    sc.appendChild(mid);
+    sc.innerHTML=sc.innerHTML+'<div class="s num">'+String(ht.score??"—")+'</div><div class="t">'+esc(ht.abbrev||"")+"</div>";
+    c.appendChild(sc);
+    if(!mine){
+      c.appendChild(el("p","note","Ce match n'est pas dans la période analysée."));
+      b.appendChild(c); return;
+    }
+    const g=effG(mine);
+    const ids={};
+    [at,ht].forEach(t=>scorersOf(t).forEach(s=>{ids[String(s.playerId)]=(ids[String(s.playerId)]||0)+1;}));
+    MKS.forEach(mk=>{
+      const top=g.players.filter(p=>p[mk].rank&&p[mk].rank<=3).sort((a,b)=>a[mk].rank-b[mk].rank);
+      if(!top.length) return;
+      const box2=el("div");
+      box2.appendChild(el("div","mk",mk.toUpperCase()));
+      top.forEach(p=>{
+        const n=ids[String(p.id)]||0;
+        const d=el("div","pick");
+        d.appendChild(photo(p.name,p.headshot,""));
+        const bb=el("div","b");
+        bb.innerHTML='<div class="t"><span class="st">'+p[mk].etoiles+'</span> <span class="n">'+esc(p.name)
+          +'</span> <span class="pill">'+esc(p.abbr)+'</span><span class="pr">'+pcent(p[mk].prob)+'</span></div>'
+          +'<div class="kv">'+(n?'<span class="hit">'+n+" but(s) déjà</span> · ":"")
+          +esc(mk==="passeur"?"passe à vérifier sur la feuille de match":(n?"buteur en bonne voie":"rien pour l'instant"))+"</div>";
+        d.appendChild(bb);
+        box2.appendChild(d);
+      });
+      c.appendChild(box2);
+    });
+    const b2=el("button","btn sm gh","Voir l'analyse");
+    b2.onclick=()=>goDetail(mine.id);
+    c.appendChild(b2);
+    b.appendChild(c);
+  });
+}
+
+/* ============================ onglet 5 : méthode ============================ */
+/* ============================ onglet 5 : méthode ============================ */
+const SECTIONS=[
+ ["Ce que fait cette app",
+  ["Pour chaque match à venir et chaque joueur des deux équipes, l'app classe les trois marchés "
+   +"français — buteur (au moins un but), passeur (au moins une passe décisive) et pointeur "
+   +"(but ou passe) — par probabilité de réussite, puis explique le calcul en chiffres.",
+   "Le pointeur est le marché le plus fréquent : le hockey crédite deux passes par but, ce qui "
+   +"double les occasions par rapport au football."]],
+ ["Le calcul",
+  ["1. Buts attendus (λ) : moyenne de la production à 5 contre 5 et de la production totale, "
+   +"ajustée par la défense adverse, le gardien adverse, le volume de tirs concédés, la qualité "
+   +"de l'attaque, l'historique contre cet adversaire et un objectif de palier rond. Le pourcentage "
+   +"de tir est régressé vers la moyenne (50 % carrière, 50 % ligue) pour ne pas surpayer une "
+   +"série chanceuse.",
+   "2. Passes attendues : passes par match × facteur gardien × qualité offensive, plus 60 % des "
+   +"passes que ses propres buts génèrent.",
+   "3. Probabilité = 1 − e^(−λ). Indice de confiance = 80 % sur la probabilité + 20 % sur la "
+   +"solidité des données (matchs joués, échantillon, back-to-back, présaison).",
+   "4. Un joueur avec λ = 0 (aucun but ni aucune passe de la saison) n'est pas classé."]],
+ ["Les recrues",
+  ["Un joueur sans référence NHL (recrue, rappelé de l'AHL, arrivée d'Europe) est projeté depuis sa "
+   +"dernière saison en ligue mineure avec un facteur de conversion : AHL × 0,40 pour les buts et "
+   +"× 0,30 pour les passes, KHL et Suisse × 0,55 / 0,46, ligues suédoise et finlandaise × 0,42 / 0,34, "
+   +"junior et NCAA × 0,20 / 0,15. Le temps de glace est estimé selon le poste et l'année de repêchage.",
+   "Ces fiches sont volontairement plafonnées au palier 2 : sans match NHL, la projection reste une "
+   +"indication, pas un signal."]],
+ ["Y a-t-il une IA derrière ?",
+  ["Non. Aucune IA générative, aucun réseau de neurones, aucun modèle entraîné, aucun appel "
+   +"à un service externe : le classement sort de formules explicites — loi de Poisson, "
+   +"régression du pourcentage de tir, facteurs multiplicatifs bornés — dont chaque "
+   +"coefficient est écrit dans l'onglet Méthode et dans engine.py.",
+   "Conséquence : les mêmes données produisent exactement les mêmes pronostics, à chaque "
+   +"exécution. Rien n'est inventé, tout est vérifiable, et chaque justification ne cite que "
+   +"des chiffres issus de l'API officielle NHL.",
+   "Le contrepartie : le modèle ne « comprend » pas le hockey. Il ne connaît ni les trios, "
+   +"ni les blessures non déclarées, ni l'effet d'un changement d'entraîneur. C'est pour ça "
+   +"que les onglets Analyse et Rafraîchir te laissent corriger le gardien et les absents."]],
+ ["Version statique (Netlify Drop)",
+  ["Ce dépôt de fichiers ne contient aucun serveur. Les analyses sont donc figées à la date "
+   +"indiquée en haut de l'écran, et le suivi en direct n'est pas disponible : l'API NHL "
+   +"bloque les appels directs depuis un navigateur.",
+   "Pour mettre à jour : sur ta machine, lance python3 refresh.py puis python3 "
+   +"build_static.py, et redépose le dossier dist/ sur Netlify. L'app se met alors à jour "
+   +"toute seule au prochain chargement."]],
+ ["Limites à connaître",
+  ["Pas de compositions : l'API ne publie aucun alignement avant le match. Le gardien partant est une "
+   +"estimation (le plus souvent aligné sur les 4 derniers matchs). Corrigez-le dans l'onglet Analyse "
+   +"quand l'information tombe, puis relancez l'analyse.",
+   "Les passes décisives ne sont pas traçables en direct : l'onglet Live confirme les buts, pas les "
+   +"assistances.",
+   "Présaison : temps de glace et trios non représentatifs, indice déjà pénalisé de 20 %.",
+   "Aucune cote : une probabilité de 70 % ne dit pas si le pari est rentable chez votre bookmaker.",
+   "Un pari sur un joueur qui ne joue pas est annulé — déclarez les absents."]]
+];
+function rMethode(m){
+  const L=S.d.league;
+  SECTIONS.forEach(([titre,paras])=>{
+    const c=el("div","card");
+    c.appendChild(el("h2",null,esc(titre)));
+    paras.forEach(p=>c.appendChild(el("p","note",esc(p))));
+    m.appendChild(c);
+  });
+  const pal=el("div","card");
+  pal.appendChild(el("h2",null,"Les 5 paliers"));
+  const rows=[[5,"88 et plus","forte conviction","base d'un combiné"],
+    [4,"75 à 88","solide","pari simple raisonnable"],
+    [3,"62 à 75","correct","à combiner avec prudence"],
+    [2,"50 à 62","risqué","petite mise seulement"],
+    [1,"moins de 50","très spéculatif","à éviter"]];
+  pal.appendChild(el("div","tw",'<table><thead><tr><th>Palier</th><th>Indice</th><th>Lecture</th>'
+    +'<th>Usage</th></tr></thead><tbody>'
+    +rows.map(r=>'<tr><td class="st">'+etoiles(r[0])+'</td><td>'+esc(r[1])+'</td><td>'+esc(r[2])
+      +'</td><td>'+esc(r[3])+'</td></tr>').join("")+'</tbody></table>'));
+  m.appendChild(pal);
+
+  const lg=el("div","card");
+  lg.appendChild(el("h2",null,"Références ligue"));
+  [["ARR % moyen",pcx(L.savePctAvg)],["Buts concédés par match",f2(L.gaPerGame)],
+   ["Tirs concédés par match",f1(L.shotsAgainst)],["Efficacité de tir",pcx(L.shootingPctAvg)],
+   ["Désavantage numérique moyen",pcx(L.pkPctAvg)],["Matchs analysés",String(S.d.games.length)],
+   ["Analyses joueur",nbf().toLocaleString("fr-FR")],["Saison de référence",lab(S.d.refSeason)]]
+   .forEach(([k,v])=>{const r=el("div","row");
+     r.innerHTML="<span>"+esc(k)+"</span><span>"+esc(v)+"</span>";lg.appendChild(r);});
+  m.appendChild(lg);
+}
+
+boot();
+/* Installable comme app web sur Chrome et Safari. Enregistré seulement en
+   HTTPS ou localhost, et jamais dans un aperçu iframe sans réseau. */
+if(typeof navigator!=="undefined"&&"serviceWorker" in navigator
+   &&(location.protocol==="https:"||location.hostname==="localhost"||/^127\./.test(location.hostname))){
+  window.addEventListener("load",()=>{
+    navigator.serviceWorker.register("sw.js").catch(()=>{});
+  });
+}
+</script>
+</body>
+</html>

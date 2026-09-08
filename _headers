@@ -1,0 +1,29 @@
+# En-têtes servis par Netlify. Le service worker et le HTML ne doivent jamais
+# être mis en cache longtemps, sinon une mise à jour met des jours à arriver.
+
+/
+  Cache-Control: no-cache
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+
+/app.html
+  Cache-Control: no-cache
+  X-Content-Type-Options: nosniff
+
+/index.html
+  Cache-Control: no-cache
+
+/sw.js
+  Cache-Control: no-cache, no-store, must-revalidate
+  Service-Worker-Allowed: /
+
+/manifest.webmanifest
+  Cache-Control: public, max-age=3600
+  Content-Type: application/manifest+json
+
+/data/*
+  Cache-Control: public, max-age=900, stale-while-revalidate=86400
+  X-Content-Type-Options: nosniff
+
+/icons/*
+  Cache-Control: public, max-age=31536000, immutable

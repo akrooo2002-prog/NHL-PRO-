@@ -1,0 +1,19 @@
+# Cloudflare Workers — offre gratuite (100 000 requêtes/jour, sans carte bancaire).
+#   npm i -g wrangler && wrangler login && wrangler deploy
+#
+# Les secrets se posent APRÈS le premier déploiement :
+#   wrangler secret put GITHUB_REPO      ->  ton-pseudo/ton-depot
+#   wrangler secret put GITHUB_TOKEN     ->  jeton GitHub (droit « Actions: write »)
+#   wrangler secret put REFRESH_TOKEN    ->  une phrase longue au hasard (facultatif)
+
+name = "nhl-pronos-proxy"
+main = "worker.js"
+compatibility_date = "2026-01-01"
+
+[vars]
+GITHUB_WORKFLOW = "refresh.yml"
+
+# Décommente et remplis pour un déclenchement automatique toutes les heures
+# (le site se met alors à jour tout seul, sans même cliquer) :
+# [triggers]
+# crons = ["10 */1 * * *"]

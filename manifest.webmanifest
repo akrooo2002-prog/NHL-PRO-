@@ -1,0 +1,19 @@
+{
+  "name": "NHL Pronos — buteur, passeur, pointeur",
+  "short_name": "NHL Pronos",
+  "description": "Quel marché jouer sur chaque match NHL, et pourquoi. Podiums du jour, analyses chiffrées, probabilités et indice de confiance.",
+  "lang": "fr",
+  "dir": "ltr",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0a0c10",
+  "theme_color": "#0a0c10",
+  "categories": ["sports", "utilities"],
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

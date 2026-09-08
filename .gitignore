@@ -1,0 +1,10 @@
+# Fichiers générés : ils ne doivent jamais être commités.
+# data/ fait 28 Mo et dist/ 18 Mo — les pousser dans Git saturerait le dépôt
+# en quelques rafraîchissements. GitHub Actions les régénère à chaque exécution.
+data/
+dist/
+logs/
+*.zip
+__pycache__/
+*.pyc
+.refresh.lock

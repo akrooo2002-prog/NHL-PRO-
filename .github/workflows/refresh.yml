@@ -1,0 +1,105 @@
+# Régénère les analyses et redéploie le site — sans serveur qui tourne.
+#
+# Déclenché par :
+#   · le bouton Rafraîchir de l'app (via le Worker Cloudflare) ;
+#   · un cron, deux fois par jour (à décommenter plus bas) ;
+#   · la main : onglet Actions → « Rafraîchir les analyses » → Run workflow.
+#
+# Coût : 0. GitHub offre 2 000 minutes/mois aux dépôts publics (200 en privé).
+# Cette exécution prend ~3 minutes. Netlify reçoit le dossier par son API : le
+# dépôt Git ne grossit donc jamais.
+
+name: Rafraîchir les analyses
+
+on:
+  workflow_dispatch:
+  # schedule:
+  #   - cron: "10 7 * * *"     # 07 h 10 UTC
+  #   - cron: "10 19 * * *"    # 19 h 10 UTC
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rafraichissement
+  cancel-in-progress: false     # on termine la collecte en cours, on ne la coupe pas
+
+jobs:
+  rafraichir:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Collecte des stats NHL puis moteur d'analyse
+        run: |
+          set -e
+          python3 fetch_pronos.py
+          python3 engine.py
+          python3 - <<'PY'
+          import json
+          d = json.load(open("data/analyse.json", encoding="utf-8"))
+          n = len(d["games"])
+          a = sum(len(g["players"]) for g in d["games"])
+          r = sum(1 for g in d["games"] for p in g["players"] if p.get("recrue"))
+          assert n >= 20, f"trop peu de matchs : {n}"
+          assert a >= 500, f"trop peu d'analyses : {a}"
+          print(f"{n} matchs, {a} analyses, dont {r} recrues, généré le {d['generatedUtc']}")
+          PY
+
+      - name: Tests
+        run: |
+          python3 server.py --selftest --skip-refresh
+          sed -n '/^<script>$/,/^<\/script>$/p' app.html | sed '1d;$d' > /tmp/app-inline.js
+          node --check /tmp/app-inline.js
+
+      - name: Construction du dossier statique
+        run: |
+          python3 build_static.py dist
+          # adresse du proxy Live / Rafraîchir (facultatif)
+          if [ -n "${{ vars.WORKER_URL }}" ]; then
+            printf '{"api":"%s"}\n' "${{ vars.WORKER_URL }}" > dist/config.json
+            echo "config.json -> ${{ vars.WORKER_URL }}"
+          fi
+          test -f dist/data/analyse.json
+          test -f dist/app.html
+          test -f dist/sw.js
+          (cd dist && zip -qr ../site.zip .)
+          ls -lh site.zip
+
+      - name: Dépôt sur Netlify
+        if: ${{ secrets.NETLIFY_AUTH_TOKEN != '' && secrets.NETLIFY_SITE_ID != '' }}
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+        run: |
+          curl -sSf -H "Content-Type: application/zip" \
+               -H "Authorization: Bearer $NETLIFY_AUTH_TOKEN" \
+               --data-binary "@site.zip" \
+               "https://api.netlify.com/api/v1/sites/$NETLIFY_SITE_ID/deploys" \
+               -o deploy.json
+          python3 - <<'PY'
+          import json
+          d = json.load(open("deploy.json", encoding="utf-8"))
+          print("déployé :", d.get("ssl_url") or d.get("url"), "— état", d.get("state"))
+          PY
+
+      - name: Dépôt sur Cloudflare Pages (variante)
+        if: ${{ secrets.CLOUDFLARE_API_TOKEN != '' && vars.CLOUDFLARE_ACCOUNT_ID != '' && vars.CF_PROJECT != '' }}
+        run: |
+          npm i -g wrangler@latest
+          wrangler pages deploy dist --project-name "${{ vars.CF_PROJECT }}" --commit-dirty=true
+
+      - name: Résumé
+        if: always()
+        run: |
+          {
+            echo "### Rafraîchissement terminé"
+            echo '```'
+            python3 -c "import json;d=json.load(open('data/analyse.json'));print(len(d['games']),'matchs, généré le',d['generatedUtc'])" 2>/dev/null || echo "pas de données"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
