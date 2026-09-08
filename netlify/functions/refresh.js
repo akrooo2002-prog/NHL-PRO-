@@ -1,4 +1,5 @@
 /* Déclenche le workflow GitHub qui régénère les analyses et redéploie le site. */
+function h0() { return { "Content-Type": "application/json" }; }
 exports.handler = async () => {
   /* __GH_REPO__ et __GH_PAT__ sont remplacés par le workflow GitHub au moment
      du déploiement (jamais en clair dans le dépôt). */
