@@ -265,6 +265,9 @@ function serverDiag(s){
   return "Serveur injoignable : relance <code>python3 server.py 8000</code>.";
 }
 async function chargerDonnees(){
+  // relit aussi config.json : un onglet ouvert avant la mise en place du proxy
+  // bascule tout seul sur « Rafraîchir » au prochain Recharger.
+  await lireConfig();
   S.d=await apiFetch("data/analyse.json",null,60000).then(r=>r.json());
   S.date=S.d?(dates()[0]||S.date):S.date;
   header(); render();
