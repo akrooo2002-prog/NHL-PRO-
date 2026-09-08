@@ -119,6 +119,13 @@ def main(argv):
     ico = os.path.join(RACINE, "icons")
     if os.path.isdir(ico):
         shutil.copytree(ico, os.path.join(out, "icons"))
+    # fonctions Netlify (Live + Rafraîchir sans compte Cloudflare)
+    nf = os.path.join(RACINE, "netlify")
+    if os.path.isdir(nf):
+        shutil.copytree(nf, os.path.join(out, "netlify"))
+    nft = os.path.join(RACINE, "netlify.toml")
+    if os.path.exists(nft):
+        shutil.copy2(nft, os.path.join(out, "netlify.toml"))
 
     brut = os.path.getsize(os.path.join(out, "data", "analyse.json"))
     fiches = [f for f in os.listdir(os.path.join(out, "data")) if f.startswith("match-")]

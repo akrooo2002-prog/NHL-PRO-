@@ -1,0 +1,18 @@
+# Fonctions serverless : le Live et le Rafraîchir, sans compte Cloudflare.
+[functions]
+  directory = "netlify/functions"
+
+[[redirects]]
+  from = "/live"
+  to = "/.netlify/functions/live"
+  status = 200
+
+[[redirects]]
+  from = "/refresh"
+  to = "/.netlify/functions/refresh"
+  status = 200
+
+[[redirects]]
+  from = "/healthz"
+  to = "/.netlify/functions/healthz"
+  status = 200

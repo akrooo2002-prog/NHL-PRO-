@@ -60,10 +60,19 @@ jobs:
       - name: Construction du dossier statique
         run: |
           python3 build_static.py dist
-          # adresse du proxy Live / Rafraîchir (facultatif)
+          # injection du déclencheur GitHub dans la fonction refresh (jamais en clair au dépôt)
+          sed -i "s|__GH_REPO__|${{ github.repository }}|; s|__GH_PAT__|${{ secrets.GH_PAT }}|" \
+            dist/netlify/functions/refresh.js
+          grep -q "__GH_PAT__" dist/netlify/functions/refresh.js && { echo "injection échouée"; exit 1; }
+          # adresse du proxy Live / Rafraîchir :
+          #   · functions Netlify même origine ("/") par défaut ;
+          #   · ou Worker Cloudflare si la variable WORKER_URL est définie.
           if [ -n "${{ vars.WORKER_URL }}" ]; then
             printf '{"api":"%s"}\n' "${{ vars.WORKER_URL }}" > dist/config.json
             echo "config.json -> ${{ vars.WORKER_URL }}"
+          else
+            printf '{"api":"/"}\n' > dist/config.json
+            echo "config.json -> / (functions Netlify)"
           fi
           test -f dist/data/analyse.json
           test -f dist/app.html
