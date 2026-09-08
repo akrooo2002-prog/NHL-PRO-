@@ -1,3 +1,8 @@
+# Pas de build : le dossier est déjà construit par GitHub Actions.
+[build]
+  command = ""
+  publish = "."
+
 # Fonctions serverless : le Live et le Rafraîchir, sans compte Cloudflare.
 [functions]
   directory = "netlify/functions"
