@@ -74,7 +74,7 @@ jobs:
             printf '{"api":"/"}\n' > dist/config.json
             echo "config.json -> / (functions Netlify)"
           fi
-          test -f dist/data/analyse.json
+          test -f dist/data/index.json
           test -f dist/app.html
           test -f dist/sw.js
           (cd dist && zip -qr ../site.zip .)
