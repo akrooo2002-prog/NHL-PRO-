@@ -5,12 +5,13 @@ hébergement statique gratuit).
 
   python3 build_static.py [dossier-sortie]      (défaut : dist)
 
-Deux fichiers de données, parce qu'un seul JSON de 18 Mo est inutilisable sur
-mobile en 4G :
+Trois niveaux de données, parce qu'un seul JSON de 18 Mo est inutilisable
+sur mobile en 4G :
 
-  data/analyse.json      l'index : calendrier, contexte, gardiens, et les 10
-                         premiers de chaque marché par match (~400 Ko une fois
-                         compressé). Suffit aux onglets Podium et Matchs.
+  data/index.json        calendrier, contexte, gardiens — SANS les joueurs
+                         (~40 Ko compressé). Chargé au démarrage.
+  data/jour-<date>.json  les 6 premiers de chaque marché pour chaque match du
+                         jour (~30-80 Ko). Chargé quand on ouvre un jour.
   data/match-<id>.json   la fiche complète d'un match : tous les joueurs et les
                          justifications détaillées. Chargée à la demande par
                          l'onglet Analyse (~20-50 Ko par match).
@@ -27,7 +28,9 @@ import shutil
 import sys
 
 MKS = ("buteur", "passeur", "pointeur")
-TOP = 10                       # joueurs conservés par marché dans l'index
+TOP_JOUR = 6                   # joueurs par marché dans les fichiers jour
+TOP_FICHE = 10                 # justifications détaillées dans la fiche match
+TOP = TOP_FICHE                # compat (tests)
 RACINE = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -68,18 +71,17 @@ def main(argv):
 
     index = {k: v for k, v in d.items() if k != "games"}
     index["statique"] = True
-    index["top"] = TOP
-    jeux = []
+    index["top"] = TOP_JOUR
+    index["analyses"] = sum(len(g["players"]) for g in d["games"])
+    index["games"] = [{k: v for k, v in g.items() if k != "players"} for g in d["games"]]
+
+    jours = {}
     for g in d["games"]:
         gardes = set()
         for mk in MKS:
             classes = [x for x in g["players"] if x[mk]["rank"]]
             classes.sort(key=lambda x: x[mk]["rank"])
-            gardes.update(x["id"] for x in classes[:TOP])
-        jeu = {k: v for k, v in g.items() if k != "players"}
-        jeu["players"] = [version_index(x) for x in g["players"] if x["id"] in gardes]
-        jeu["effectif"] = len(g["players"])
-        jeux.append(jeu)
+            gardes.update(x["id"] for x in classes[:TOP_JOUR])
 
         # fiche complète, avec justifications détaillées pour le top 10
         fiche = dict(g)
@@ -88,24 +90,32 @@ def main(argv):
             y = dict(x)
             for mk in MKS:
                 m = dict(x[mk])
-                if not (m["rank"] and m["rank"] <= TOP):
+                if not (m["rank"] and m["rank"] <= TOP_FICHE):
                     m["why"] = raccourcir(m["why"])
                 y[mk] = m
             fiche["players"].append(y)
         with open(os.path.join(out, "data", f"match-{g['id']}.json"), "w",
                   encoding="utf-8") as fh:
             json.dump(fiche, fh, separators=(",", ":"), ensure_ascii=False)
-    index["games"] = jeux
 
-    with open(os.path.join(out, "data", "analyse.json"), "w", encoding="utf-8") as fh:
+        jours.setdefault(g["date"], []).append(
+            {"id": g["id"], "effectif": len(g["players"]),
+             "players": [version_index(x) for x in g["players"] if x["id"] in gardes]})
+
+    with open(os.path.join(out, "data", "index.json"), "w", encoding="utf-8") as fh:
         json.dump(index, fh, separators=(",", ":"), ensure_ascii=False)
+    for date, jeux in jours.items():
+        with open(os.path.join(out, "data", f"jour-{date}.json"), "w",
+                  encoding="utf-8") as fh:
+            json.dump({"date": date, "games": jeux}, fh, separators=(",", ":"),
+                      ensure_ascii=False)
 
     for nom in ("app.html", "manifest.webmanifest", "sw.js", "_headers", "config.json"):
-        s = os.path.join(RACINE, nom)
-        if not os.path.exists(s):
+        srcf = os.path.join(RACINE, nom)
+        if not os.path.exists(srcf):
             print(f"avertissement : {nom} absent du projet")
             continue
-        shutil.copy2(s, os.path.join(out, nom))
+        shutil.copy2(srcf, os.path.join(out, nom))
     # Netlify sert index.html à la racine : on renvoie vers l'app
     with open(os.path.join(out, "index.html"), "w", encoding="utf-8") as fh:
         fh.write('<!doctype html><html lang="fr"><head><meta charset="utf-8">'
@@ -127,13 +137,27 @@ def main(argv):
     if os.path.exists(nft):
         shutil.copy2(nft, os.path.join(out, "netlify.toml"))
 
-    brut = os.path.getsize(os.path.join(out, "data", "analyse.json"))
+    brut = os.path.getsize(os.path.join(out, "data", "index.json"))
+    nj = len([f for f in os.listdir(os.path.join(out, "data")) if f.startswith("jour-")])
     fiches = [f for f in os.listdir(os.path.join(out, "data")) if f.startswith("match-")]
     plus_grosse = max(os.path.getsize(os.path.join(out, "data", f)) for f in fiches)
-    print(f"{out} : index {brut // 1024} Ko, {len(fiches)} fiches match "
-          f"(max {plus_grosse // 1024} Ko), {len(jeux)} matchs")
+    print(f"{out} : index {brut // 1024} Ko, {nj} fichiers jour, {len(fiches)} fiches "
+          f"match (max {plus_grosse // 1024} Ko), {len(index['games'])} matchs")
     print("à déposer sur https://app.netlify.com/drop")
     return 0
+
+    ico = os.path.join(RACINE, "icons")
+    if os.path.isdir(ico):
+        shutil.copytree(ico, os.path.join(out, "icons"))
+    # fonctions Netlify (Live + Rafraîchir sans compte Cloudflare)
+    nf = os.path.join(RACINE, "netlify")
+    if os.path.isdir(nf):
+        shutil.copytree(nf, os.path.join(out, "netlify"))
+    nft = os.path.join(RACINE, "netlify.toml")
+    if os.path.exists(nft):
+        shutil.copy2(nft, os.path.join(out, "netlify.toml"))
+
+
 
 
 if __name__ == "__main__":

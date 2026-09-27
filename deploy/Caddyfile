@@ -1,0 +1,36 @@
+# Reverse proxy : TLS automatique (Let's Encrypt) + accès privé.
+# __DOMAIN__, __USER__ et __HASH__ sont remplacés par deploy.sh install.
+# Vérifier la syntaxe :  caddy validate --config /etc/caddy/Caddyfile
+
+__DOMAIN__ {
+	# --- accès privé ---
+	# Authentification HTTP : l'identifiant et le mot de passe demandés par le
+	# navigateur. Le hash est produit par : caddy hash-password --plaintext '...'
+	# À retirer si tu n'exposes l'app qu'à travers Tailscale (voir DEPLOY.md).
+	basic_auth {
+		__USER__ __HASH__
+	}
+
+	encode zstd gzip
+
+	reverse_proxy 127.0.0.1:__PORT__ {
+		# le rafraîchissement lance une collecte : ne pas couper la requête
+		flush_interval -1
+	}
+
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options SAMEORIGIN
+		Referrer-Policy no-referrer
+		# pas de Content-Security-Policy restrictive : l'app est un fichier
+		# unique avec script et styles en ligne (et les photos NHL en https)
+		-Server
+	}
+
+	log {
+		output file /var/log/caddy/nhl-pronos.log {
+			roll_size 10MiB
+			roll_keep 5
+		}
+	}
+}

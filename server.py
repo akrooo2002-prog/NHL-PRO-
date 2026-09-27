@@ -43,6 +43,8 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 CACHE = {}
 ZIP_CACHE = {}   # "dist.zip" -> (octets, horodatage des données) : archive du dossier Netlify
 ZIP_LOCK = threading.Lock()
+# archives prêtes à télécharger (installation depuis un autre appareil)
+TELECHARGEABLES = {"depot-github.zip", "dist.zip"}
 LIVE = {"at": 0.0, "date": None, "body": None}
 LIVE_TTL = 20.0
 REFRESH = {"running": False, "started": None, "ended": None, "ok": None, "log": []}
@@ -273,6 +275,17 @@ class Handler(BaseHTTPRequestHandler):
             return self.live(urllib.parse.parse_qs(parsed.query).get("date", [""])[0])
         if route in ("/dist.zip", "/netlify.zip"):
             return self.zip_dist()
+        if route.startswith("/telechargement/"):
+            # archives préparées à la racine du projet, à télécharger telles quelles
+            nom = os.path.basename(route.rsplit("/", 1)[1])
+            if nom not in TELECHARGEABLES:
+                return self.send(404, json.dumps(
+                    {"error": "fichier non proposé",
+                     "disponibles": sorted(TELECHARGEABLES)}).encode())
+            with open(os.path.join(ROOT, nom), "rb") as fh:
+                blob = fh.read()
+            return self.send(200, blob, "application/zip",
+                             [("Content-Disposition", f'attachment; filename="{nom}"')])
         return self.send(404, json.dumps({"error": "route inconnue", "path": route}).encode())
 
     def zip_dist(self):
@@ -406,6 +419,16 @@ def selftest(argv=()):
           st == 200 and "dist/app.html" in noms and "dist/data/analyse.json" in noms,
           f"{st}, {len(b) // 1024} Ko, {len(noms)} fichiers, "
           f"{h.get('Content-Disposition', '')}")
+    st, b, h = req("/telechargement/depot-github.zip")
+    try:
+        noms = zipfile.ZipFile(io.BytesIO(b)).namelist()
+    except Exception:                                       # noqa: BLE001
+        noms = []
+    teste("GET /telechargement/depot-github.zip",
+          st in (200, 404) and (st == 404 or ".github/workflows/refresh.yml" in noms),
+          f"{st}, {len(noms)} fichiers" if st == 200 else f"{st} (archive non préparée)")
+    st, b, _ = req("/telechargement/pas-prevu.zip")
+    teste("GET /telechargement/* refuse un nom non prévu", st == 404, f"{st}")
     st, b, _ = req("/api/live?date=2026-13-99")
     teste("GET /api/live date absurde -> 400", st == 400, f"{st}")
     st, b, _ = req("/api/live?date=" + time.strftime("%Y-%m-%d"))

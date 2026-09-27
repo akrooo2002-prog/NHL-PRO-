@@ -1,0 +1,15 @@
+[Unit]
+Description=Pronos NHL — rafraîchissement planifié (2x par jour)
+Documentation=file://__APPDIR__/DEPLOY.md
+
+[Timer]
+# 07 h 10 et 19 h 10 UTC : avant les matchs du soir en Amérique du Nord
+OnCalendar=*-*-* 07:10:00 UTC
+OnCalendar=*-*-* 19:10:00 UTC
+# si la machine était éteinte, on rattrape au démarrage
+Persistent=true
+RandomizedDelaySec=240
+Unit=nhl-pronos-refresh.service
+
+[Install]
+WantedBy=timers.target

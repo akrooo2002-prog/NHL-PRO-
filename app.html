@@ -72,6 +72,8 @@ code{background:#0f1319;border:1px solid var(--line);border-radius:5px;padding:1
 #main{padding:14px 14px 96px;max-width:1080px;margin:0 auto}
 #foot{padding:0 14px 110px;max-width:1080px;margin:0 auto;font-size:11.5px;color:#5f6b7b;line-height:1.5}
 .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin:0 0 12px}
+.card,.match{content-visibility:auto;contain-intrinsic-size:auto 240px}
+.spin-note:before{content:"";display:inline-block;width:12px;height:12px;border:2px solid var(--line);border-top-color:var(--acc);border-radius:50%;margin-right:8px;vertical-align:-2px;animation:sp .8s linear infinite}
 .card h2{margin:0 0 9px;font-size:14.5px;letter-spacing:-.1px}
 .card h3{margin:0 0 8px;font-size:13.5px}
 .note{margin:0;color:var(--mut);font-size:13px;line-height:1.5}
@@ -212,7 +214,7 @@ h2.sec{margin:22px 0 10px;font-size:13px;text-transform:uppercase;letter-spacing
 /* ============================ état ============================ */
 let PROXY="";
 const S={d:null,srv:null,statique:false,api:"",complets:{},tab:"podium",game:null,date:null,
-  mk:"pointeur",sort:{},ov:{},hidePre:false,live:null,liveAt:null,liveErr:null,
+  mk:"pointeur",sort:{},ov:{},hidePre:false,live:null,liveAt:null,liveErr:null,jours:{},complets2:null,
   expand:false,search:""};
 const $=s=>document.querySelector(s);
 /* La page doit être servie par server.py. Ouverte en file://, rien ne peut
@@ -268,10 +270,27 @@ async function chargerDonnees(){
   // relit aussi config.json : un onglet ouvert avant la mise en place du proxy
   // bascule tout seul sur « Rafraîchir » au prochain Recharger.
   await lireConfig();
-  S.d=await apiFetch("data/analyse.json",null,60000).then(r=>r.json());
+  // statique : index léger (calendrier+contexte) puis un fichier par jour ;
+  // serveur local : analyse.json complet d'un coup.
+  try{ S.d=await apiFetch("data/index.json",null,60000).then(r=>r.json()); }
+  catch(e){ S.d=await apiFetch("data/analyse.json",null,60000).then(r=>r.json()); }
+  S.jours={}; S.complets={};
+  S.statique=!!S.d.statique;
   S.date=S.d?(dates()[0]||S.date):S.date;
   header(); render();
   return S.d;
+}
+
+/* Mode statique : les joueurs d'un jour arrivent avec leur fichier (~30 Ko),
+   pas au démarrage. Sans effet en mode serveur (players déjà présents). */
+async function jourDe(date){
+  if(!S.d||!S.statique||S.jours[date]) return;
+  const j=await apiFetch("data/jour-"+date+".json",null,30000).then(r=>r.json());
+  const parId={};
+  (j.games||[]).forEach(g=>{ parId[g.id]=g; });
+  S.d.games.forEach(g=>{ const pj=parId[g.id];
+    if(pj){ g.players=pj.players; g.effectif=pj.effectif; } });
+  S.jours[date]=true;
 }
 const el=(t,c,h)=>{const n=document.createElement(t);if(c)n.className=c;if(h!=null)n.innerHTML=h;return n;};
 const esc=s=>String(s??"").replace(/[&<>"]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]));
@@ -286,7 +305,7 @@ const FRL={absent:"absent du dernier match",hors_echantillon:"forme non mesurée
 
 /* ============================ formatage ============================ */
 const lab=s=>s?String(s).slice(0,4)+"-"+String(s).slice(4):"—";
-const nbf=()=>S.d.games.reduce((a,g)=>a+g.players.length,0);
+const nbf=()=>S.d.analyses!=null?S.d.analyses:S.d.games.reduce((a,g)=>a+(g.players||[]).length,0);
 const pcx=(x,d=1)=>x==null?"—":(x*100).toFixed(d).replace(".",",")+" %";
 const f1=x=>x==null?"—":Number(x).toFixed(1).replace(".",",");
 const f2=x=>x==null?"—":Number(x).toFixed(2).replace(".",",");
@@ -311,7 +330,7 @@ function age(txt){
 /* photo : si l'image ne charge pas, on met les initiales */
 function photo(n,src,cl){
   if(src){
-    const i=el("img",cl||""); i.src=src; i.alt="";
+    const i=el("img",cl||""); i.src=src; i.alt=""; i.loading="lazy"; i.decoding="async";
     i.onerror=()=>{const d=el("div",cl||"");d.textContent=initiales(n);
       d.style.cssText="display:flex;align-items:center;justify-content:center;background:#0f1319;font-size:12px;color:#8896a8";
       if(i.parentNode) i.parentNode.replaceChild(d,i);};
@@ -326,7 +345,7 @@ function photo(n,src,cl){
 async function boot(){
   await lireConfig();
   S.srv=await serverAlive();
-  try{ S.d=await apiFetch("data/analyse.json",null,60000).then(r=>r.json()); }
+  try{ await chargerDonnees(); }
   catch(e){
     $("#main").innerHTML='<div class="card"><h2>Données absentes</h2>'
       +'<p class="note">'+serverDiag(S.srv)+"</p>"
@@ -407,7 +426,7 @@ const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
 function effG(game){
   const g={...game};
   g.goalieOptions={away:goalieOptions(g,g.away),home:goalieOptions(g,g.home)};
-  g.players=game.players.map(p=>({...p,buteur:{...p.buteur},passeur:{...p.passeur},pointeur:{...p.pointeur},
+  g.players=(game.players||[]).map(p=>({...p,buteur:{...p.buteur},passeur:{...p.passeur},pointeur:{...p.pointeur},
     flags:p.flags.slice(),raw:{...p.raw}}));
   for(const side of ["away","home"]){
     const me=g.ctx[side]={...g.ctx[side]}, opp=side==="away"?"home":"away";
@@ -517,17 +536,19 @@ async function refreshStatique(){
   if(j&&j.error){ toast("Refusé : "+j.error,6000); return; }
   toast(j&&j.detail?j.detail:"Régénération lancée — compte 2 à 3 minutes.",7000);
   const b=$("#bRefresh"), tx=$("#bRefreshTx");
-  if(tx) tx.textContent="En cours…";
+  const t0=Date.now();
+  const tic=setInterval(()=>{ if(tx) tx.textContent="En cours… "+Math.round((Date.now()-t0)/1000)+" s"; },1000);
+  if(tx) tx.textContent="En cours… 0 s";
   for(let i=0;i<40;i++){
     await new Promise(r=>setTimeout(r,15000));
     try{ await chargerDonnees(); }catch(e){ continue; }
     if(S.d&&S.d.generatedUtc!==avant){
-      if(tx) tx.textContent="Rafraîchir";
+      clearInterval(tic); if(tx) tx.textContent="Rafraîchir";
       toast("Données mises à jour : "+age(S.d.generatedUtc));
       return;
     }
   }
-  if(tx) tx.textContent="Rafraîchir";
+  clearInterval(tic); if(tx) tx.textContent="Rafraîchir";
   toast("Toujours pas de nouvelles données après 10 min — voir l'onglet Actions de ton dépôt.",9000);
 }
 
@@ -571,13 +592,16 @@ function nav(){
     n.appendChild(b);
   });
 }
-function render(){
-  const m=$("#main"); m.innerHTML="";
-  if(S.tab==="podium") rPodium(m);
-  else if(S.tab==="matchs") rMatchs(m);
-  else if(S.tab==="detail") rDetail(m);
-  else if(S.tab==="live") rLive(m);
+let REND=0;
+async function render(){
+  const tok=++REND;
+  const m=$("#main"); m.innerHTML='<div class="card"><p class="note spin-note">Chargement…</p></div>';
+  if(S.tab==="podium") await rPodium(m);
+  else if(S.tab==="matchs") await rMatchs(m);
+  else if(S.tab==="detail") await rDetail(m);
+  else if(S.tab==="live") await rLive(m);
   else rMethode(m);
+  if(tok!==REND||!m.isConnected) return;
   $("#foot").innerHTML="Sources : <code>api.nhle.com/stats/rest/en</code> (stats officielles) et "
     +"<code>api-web.nhle.com/v1</code> (calendrier, effectifs, gardiens, scores). "
     +"Aucune cote : classement 100 % statistique. Généré le "+esc(S.d.generatedUtc)+".";
@@ -623,7 +647,9 @@ function podiumJour(games){
   });
   return out;
 }
-function rPodium(m){
+async function rPodium(m){
+  await jourDe(S.date).catch(()=>{});
+  m.innerHTML="";
   const games=dayPicker(m);
   if(!games.length){ m.appendChild(el("div","card",'<p class="note">Aucun match ce jour-là.</p>')); return; }
   m.appendChild(el("div","day",dateFr(S.date)));
@@ -686,7 +712,9 @@ function rPodium(m){
 }
 
 /* ============================ onglet 2 : matchs ============================ */
-function rMatchs(m){
+async function rMatchs(m){
+  await jourDe(S.date).catch(()=>{});
+  m.innerHTML="";
   const games=dayPicker(m);
   if(!games.length){ m.appendChild(el("div","card",'<p class="note">Aucun match ce jour-là.</p>')); return; }
   m.appendChild(el("div","day",dateFr(S.date)));

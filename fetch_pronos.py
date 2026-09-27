@@ -26,7 +26,7 @@ UA = {"User-Agent": "Mozilla/5.0 (compatible; NHL-Pronos/1.0)", "Accept": "appli
 SEASONS = ["20212022", "20222023", "20232024", "20242025", "20252026", "20262027"]
 LOG_PER_TEAM = 25       # game-logs récupérés par équipe (forme + détection d'absence)
 BOX_PER_TEAM = 4        # boxscores pour repérer le gardien partant
-WORKERS = 6
+WORKERS = 10
 
 
 def get(url, params=None, tries=4):

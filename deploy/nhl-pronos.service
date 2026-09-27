@@ -1,0 +1,41 @@
+[Unit]
+Description=Pronos NHL — serveur d'analyse
+Documentation=file://__APPDIR__/DEPLOY.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nhlpronos
+Group=nhlpronos
+WorkingDirectory=__APPDIR__
+ExecStart=/usr/bin/python3 __APPDIR__/server.py __PORT__
+EnvironmentFile=-__APPDIR__/deploy/nhl-pronos.env
+Restart=always
+RestartSec=3
+TimeoutStopSec=20
+
+# --- durcissement ---
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+ProtectProc=invisible
+ProcSubset=pid
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+ReadWritePaths=__APPDIR__
+# /etc/ssl : indispensable à urllib pour joindre l'API NHL en HTTPS
+ReadOnlyPaths=/etc/ssl
+
+[Install]
+WantedBy=multi-user.target

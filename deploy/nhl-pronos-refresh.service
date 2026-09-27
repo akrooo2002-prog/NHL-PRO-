@@ -1,0 +1,32 @@
+[Unit]
+Description=Pronos NHL — collecte des stats et recalcul de l'analyse
+Documentation=file://__APPDIR__/DEPLOY.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=nhlpronos
+Group=nhlpronos
+WorkingDirectory=__APPDIR__
+ExecStart=/usr/bin/python3 __APPDIR__/refresh.py
+# la collecte prend ~80 s ; on laisse de la marge
+TimeoutStartSec=1800
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+ReadWritePaths=__APPDIR__
+ReadOnlyPaths=/etc/ssl
