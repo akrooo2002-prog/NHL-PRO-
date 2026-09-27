@@ -278,7 +278,7 @@ class Handler(BaseHTTPRequestHandler):
         if route.startswith("/telechargement/"):
             # archives préparées à la racine du projet, à télécharger telles quelles
             nom = os.path.basename(route.rsplit("/", 1)[1])
-            if nom not in TELECHARGEABLES:
+            if nom not in TELECHARGEABLES or not os.path.exists(os.path.join(ROOT, nom)):
                 return self.send(404, json.dumps(
                     {"error": "fichier non proposé",
                      "disponibles": sorted(TELECHARGEABLES)}).encode())
@@ -416,7 +416,7 @@ def selftest(argv=()):
         noms = []
         print(f"  INFO  archive illisible : {exc}")
     teste("GET /dist.zip livre le dossier Netlify",
-          st == 200 and "dist/app.html" in noms and "dist/data/analyse.json" in noms,
+          st == 200 and "dist/app.html" in noms and "dist/data/index.json" in noms,
           f"{st}, {len(b) // 1024} Ko, {len(noms)} fichiers, "
           f"{h.get('Content-Disposition', '')}")
     st, b, h = req("/telechargement/depot-github.zip")
