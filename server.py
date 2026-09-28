@@ -273,6 +273,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200, json.dumps(REFRESH).encode())
         if route == "/api/live":
             return self.live(urllib.parse.parse_qs(parsed.query).get("date", [""])[0])
+        if route in ("/analyser", "/api/analyser"):
+            return self.analyser(urllib.parse.parse_qs(parsed.query))
         if route in ("/dist.zip", "/netlify.zip"):
             return self.zip_dist()
         if route.startswith("/telechargement/"):
@@ -347,6 +349,39 @@ class Handler(BaseHTTPRequestHandler):
         if status == 200:
             LIVE.update(at=time.time(), date=date, body=body)
         return self.send(status, body)
+
+    def analyser(self, qs):
+        """Analyse instantanée d'un match : collecte NHL ciblée sur les deux
+        équipes (~5 s) puis moteur. Même contrat que la fonction Netlify
+        /analyser : {ok, fiche} avec fiche au format analyse.json."""
+        try:
+            gid = int((qs.get("game") or ["0"])[0])
+        except ValueError:
+            gid = 0
+        date = (qs.get("date") or [""])[0].strip()
+        if not gid or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date):
+            return self.send(400, json.dumps(
+                {"erreur": "usage : /analyser?game=<id>&date=AAAA-MM-JJ"}).encode())
+        import engine
+        import fetch_pronos as fp
+        t0 = time.time()
+        game = fp.fetch_game_par_id(date, gid)
+        if not game:
+            return self.send(404, json.dumps(
+                {"erreur": "match introuvable à cette date"}).encode())
+        try:
+            raw = fp.collecte_un_match(game)
+            fiche = (engine.run(raw).get("games") or [None])[0]
+        except Exception as exc:                                # noqa: BLE001
+            return self.send(502, json.dumps(
+                {"erreur": f"analyse impossible : {exc}"}).encode())
+        if not fiche:
+            return self.send(500, json.dumps(
+                {"erreur": "aucune analyse produite"}).encode())
+        fiche["instant"] = {"generatedUtc": raw["generatedUtc"],
+                            "dureeS": round(time.time() - t0, 1)}
+        return self.send(200, json.dumps({"ok": True, "fiche": fiche},
+                                         ensure_ascii=False).encode())
 
     def file(self, name, ctype):
         p = os.path.join(ROOT, name)

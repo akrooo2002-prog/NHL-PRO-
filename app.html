@@ -608,6 +608,25 @@ async function render(){
 }
 const goDetail=id=>{S.game=id;S.tab="detail";nav();render();if(window.scrollTo)window.scrollTo(0,0);};
 
+/* Analyse instantanée : collecte NHL en direct, ciblée sur les 2 équipes du
+   match (~5 s côté serveur), puis exactement la même fiche que le site. */
+async function analyserInstant(g0){
+  if(S.analyseEnCours) return;
+  S.analyseEnCours=true;
+  toast("⚡ Analyse instantanée — collecte NHL en direct pour "
+    +(g0.awayNameFr||g0.away||"")+" @ "+(g0.homeNameFr||g0.home||"")+"…",9000);
+  try{
+    const j=await apiFetch("analyser?game="+g0.id+"&date="+g0.date,null,30000).then(r=>r.json());
+    if(!j.ok) throw new Error(j.erreur||"analyse refusée");
+    S.complets[g0.id]=j.fiche;
+    goDetail(g0.id);
+    toast("⚡ Terminée en "+j.fiche.instant.dureeS+" s — données en direct",6000);
+  }catch(e){
+    toast("Analyse instantanée échouée : "+String((e&&e.message)||e),7000);
+  }
+  S.analyseEnCours=false;
+}
+
 /* ============================ sélecteur de jour ============================ */
 function dayPicker(m){
   const ds=dates();
@@ -731,6 +750,10 @@ function carte(g0,n){
   ti.onclick=()=>goDetail(g0.id);
   h.appendChild(ti);
   h.appendChild(el("div","mmeta",heureFr(g.startUtc)+(g.preseason?' <span class="pill pre">présaison</span>':"")));
+  const bi=el("button","btn sm","⚡ Instant");
+  bi.title="Relancer la collecte NHL en direct pour ce match (~5 s)";
+  bi.onclick=()=>{analyserInstant(g0);};
+  h.appendChild(bi);
   c.appendChild(h);
   const ga=g.ctx.away.goalie, gh=g.ctx.home.goalie;
   c.appendChild(el("div","gk",'Gardiens probables : <b>'+esc(gh?.name||"?")+"</b> ("+pcx(gh?.sv)+") pour "
@@ -817,11 +840,18 @@ async function rDetail(m){
   const head=el("div","card");
   head.innerHTML='<h2>'+esc(g.awayNameFr||g.away)+' <span class="mut">@</span> '+esc(g.homeNameFr||g.home)+"</h2>"
     +'<p class="note">'+esc(dateFr(g.date))+" · "+heureFr(g.startUtc)+(g.venue?" · "+esc(g.venue):"")
-    +(g.preseason?' · <span class="pill pre">présaison — lecture fragile</span>':"")+"</p>";
+    +(g.preseason?' · <span class="pill pre">présaison — lecture fragile</span>':"")
+    +(g.instant?' · <span class="pill n">⚡ données en direct — analysé en '
+      +esc(String(g.instant.dureeS))+" s</span>":"")+"</p>";
   const ra=el("button","btn pri",'Ré-analyser ce match');
   ra.style.marginTop="10px";
   ra.onclick=()=>{refresh();};
   head.appendChild(ra);
+  const ri=el("button","btn","⚡ Analyse instantanée");
+  ri.style.margin="10px 0 0 8px";
+  ri.title="Collecte NHL en direct pour ce match seul (~5 s), mêmes détails";
+  ri.onclick=()=>{analyserInstant(g0);};
+  head.appendChild(ri);
   head.appendChild(el("div","kv2",'<span>Analyse de '+age(S.d.generatedUtc)+"</span>"
     +"<span>Gardiens = estimation (4 derniers matchs)</span>"
     +"<span>Les compos officielles ne sont pas publiées avant le match</span>"));
