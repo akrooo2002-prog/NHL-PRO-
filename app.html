@@ -495,6 +495,9 @@ function goalieOptions(game,abbr){
 
 /* ============================ rafraîchir ============================ */
 async function refresh(){
+  // site déployé (Netlify…) : pas de serveur Python ici — on passe par la
+  // régénération GitHub, comme le bouton du bandeau
+  if(S.statique&&S.api) return refreshStatique();
   const st=await serverAlive();
   S.srv=st;
   if(!st.ok){
