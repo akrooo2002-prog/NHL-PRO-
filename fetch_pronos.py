@@ -126,7 +126,8 @@ def fetch_skaters(season):
             "isAggregate": "true", "reportType": "basic", "isGame": "false",
             "reportName": "skatersummary", "cayenneExp": f"seasonId={season} and gameTypeId=2",
             "limit": str(page), "start": str(start),
-            "sort": json.dumps([{"property": "points", "direction": "DESC"}]),
+            "sort": json.dumps([{"property": "points", "direction": "DESC"},
+                                {"property": "playerId", "direction": "ASC"}]),
         })
         batch = (d or {}).get("data", [])
         if not batch:
@@ -145,7 +146,8 @@ def fetch_goalies(season):
             "isAggregate": "true", "reportType": "basic", "isGame": "false",
             "reportName": "goaliesummary", "cayenneExp": f"seasonId={season} and gameTypeId=2",
             "limit": str(page), "start": str(start),
-            "sort": json.dumps([{"property": "gamesPlayed", "direction": "DESC"}]),
+            "sort": json.dumps([{"property": "gamesPlayed", "direction": "DESC"},
+                                {"property": "playerId", "direction": "ASC"}]),
         })
         batch = (d or {}).get("data", [])
         if not batch:

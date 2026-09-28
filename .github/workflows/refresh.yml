@@ -59,9 +59,6 @@ jobs:
 
       - name: Construction du dossier statique
         run: |
-          # la fonction /analyser importe le moteur et la collecte : copies
-          # toujours synchronisées avec les fichiers de référence
-          cp engine.py fetch_pronos.py netlify/functions/
           python3 build_static.py dist
           # injection du déclencheur GitHub dans la fonction refresh (jamais en clair au dépôt)
           sed -i "s|__GH_REPO__|${{ github.repository }}|; s|__GH_PAT__|${{ secrets.GH_PAT }}|" \

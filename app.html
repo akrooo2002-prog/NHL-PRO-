@@ -608,19 +608,50 @@ async function render(){
 }
 const goDetail=id=>{S.game=id;S.tab="detail";nav();render();if(window.scrollTo)window.scrollTo(0,0);};
 
-/* Analyse instantanée : collecte NHL en direct, ciblée sur les 2 équipes du
-   match (~5 s côté serveur), puis exactement la même fiche que le site. */
+/* Analyse instantanée : la fonction /collecter fait la collecte NHL en direct
+   (~4 s, ciblée sur les 2 équipes), puis le MOTEUR DU SITE (engine.py, le même
+   fichier) tourne dans le navigateur via Pyodide : mêmes détails, garantie
+   structurelle. Pyodide n'est chargé qu'au premier clic, puis mis en cache. */
+const PYODIDE_CDN="https://cdn.jsdelivr.net/pyodide/v0.26.4/full/";
+async function moteurPy(){
+  if(S.py) return S.py;
+  if(!window.loadPyodide){
+    await new Promise((res,rej)=>{
+      const s=document.createElement("script");
+      s.src=PYODIDE_CDN+"pyodide.js";
+      s.onload=res;
+      s.onerror=()=>rej(new Error("moteur inaccessible (CDN)"));
+      document.head.appendChild(s);
+    });
+  }
+  S.py=await loadPyodide({indexURL:PYODIDE_CDN});
+  const src=await apiFetch("data/engine.py",null,20000).then(r=>r.text());
+  S.py.FS.writeFile("engine.py",src);
+  S.py.runPython("import json,engine");
+  return S.py;
+}
 async function analyserInstant(g0){
   if(S.analyseEnCours) return;
   S.analyseEnCours=true;
-  toast("⚡ Analyse instantanée — collecte NHL en direct pour "
-    +(g0.awayNameFr||g0.away||"")+" @ "+(g0.homeNameFr||g0.home||"")+"…",9000);
   try{
-    const j=await apiFetch("analyser?game="+g0.id+"&date="+g0.date,null,30000).then(r=>r.json());
-    if(!j.ok) throw new Error(j.erreur||"analyse refusée");
-    S.complets[g0.id]=j.fiche;
+    toast("⚡ Analyse instantanée — collecte NHL en direct pour "
+      +(g0.awayNameFr||g0.away||"")+" @ "+(g0.homeNameFr||g0.home||"")+"…",12000);
+    const raw=await apiFetch("collecter?game="+g0.id+"&date="+g0.date,null,30000).then(r=>r.json());
+    if(raw&&raw.erreur) throw new Error(raw.erreur);
+    toast("⚙️ Démarrage du moteur d'analyse…",8000);
+    const t0=Date.now();
+    const py=await moteurPy();
+    py.globals.set("_payload",JSON.stringify(raw));
+    const out=py.runPython(
+      "import json,engine\n"
+      +"_g=[x for x in engine.run(json.loads(_payload))['games'] if x['id']=="+g0.id+"]\n"
+      +"json.dumps(_g[0] if _g else None,ensure_ascii=False)");
+    const fiche=JSON.parse(out);
+    if(!fiche) throw new Error("aucune analyse produite");
+    fiche.instant={generatedUtc:raw.generatedUtc,dureeS:Math.round((Date.now()-t0)/100)/10};
+    S.complets[g0.id]=fiche;
     goDetail(g0.id);
-    toast("⚡ Terminée en "+j.fiche.instant.dureeS+" s — données en direct",6000);
+    toast("⚡ Terminée — données en direct",5000);
   }catch(e){
     toast("Analyse instantanée échouée : "+String((e&&e.message)||e),7000);
   }

@@ -23,6 +23,6 @@
   status = 200
 
 [[redirects]]
-  from = "/analyser"
-  to = "/.netlify/functions/analyser"
+  from = "/collecter"
+  to = "/.netlify/functions/collecter"
   status = 200

@@ -275,6 +275,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.live(urllib.parse.parse_qs(parsed.query).get("date", [""])[0])
         if route in ("/analyser", "/api/analyser"):
             return self.analyser(urllib.parse.parse_qs(parsed.query))
+        if route in ("/collecter", "/api/collecter"):
+            return self.collecter(urllib.parse.parse_qs(parsed.query))
         if route in ("/dist.zip", "/netlify.zip"):
             return self.zip_dist()
         if route.startswith("/telechargement/"):
@@ -382,6 +384,30 @@ class Handler(BaseHTTPRequestHandler):
                             "dureeS": round(time.time() - t0, 1)}
         return self.send(200, json.dumps({"ok": True, "fiche": fiche},
                                          ensure_ascii=False).encode())
+
+    def collecter(self, qs):
+        """Analyse instantanée, étape 1 : la collecte NHL ciblée (2 équipes),
+        sans le moteur — c'est le navigateur qui exécute engine.py (Pyodide).
+        Même contrat que la fonction Netlify /collecter."""
+        try:
+            gid = int((qs.get("game") or ["0"])[0])
+        except ValueError:
+            gid = 0
+        date = (qs.get("date") or [""])[0].strip()
+        if not gid or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date):
+            return self.send(400, json.dumps(
+                {"erreur": "usage : /collecter?game=<id>&date=AAAA-MM-JJ"}).encode())
+        import fetch_pronos as fp
+        game = fp.fetch_game_par_id(date, gid)
+        if not game:
+            return self.send(404, json.dumps(
+                {"erreur": "match introuvable à cette date"}).encode())
+        try:
+            raw = fp.collecte_un_match(game)
+        except Exception as exc:                                # noqa: BLE001
+            return self.send(502, json.dumps(
+                {"erreur": f"collecte impossible : {exc}"}).encode())
+        return self.send(200, json.dumps(raw, ensure_ascii=False).encode())
 
     def file(self, name, ctype):
         p = os.path.join(ROOT, name)

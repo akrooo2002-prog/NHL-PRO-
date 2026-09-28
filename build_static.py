@@ -116,6 +116,10 @@ def main(argv):
             print(f"avertissement : {nom} absent du projet")
             continue
         shutil.copy2(srcf, os.path.join(out, nom))
+    # le moteur est livré avec le site : l'analyse instantanée l'exécute dans
+    # le navigateur (Pyodide) — exactement le même code que le serveur
+    shutil.copy2(os.path.join(RACINE, "engine.py"),
+                 os.path.join(out, "data", "engine.py"))
     # Netlify sert index.html à la racine : on renvoie vers l'app
     with open(os.path.join(out, "index.html"), "w", encoding="utf-8") as fh:
         fh.write('<!doctype html><html lang="fr"><head><meta charset="utf-8">'
