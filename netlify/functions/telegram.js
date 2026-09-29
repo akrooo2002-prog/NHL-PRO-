@@ -53,17 +53,27 @@ const MARCHES = [
 const MK_SIMPLE = ["buteur", "passeur", "pointeur", "doubleButeur", "tripleButeur", "doublePointeur", "triplePointeur"];
 
 const AIDE =
-  "🏒 <b>Bot NHL Pronos</b> — mêmes données que le site, sans cote.\n" +
-  "Écris-moi en langage naturel, je réponds avec les tops demandés.\n\n" +
-  "<b>Filtres</b> : buteur, passeur, pointeur, 2buts, 3buts, 2points, 3points, " +
-  "double chance, triple chance, <b>outsider</b>\n" +
-  "<b>Matchs</b> : une équipe (ex. FLA, CAR), « match 3 », ou « tout »\n" +
-  "<b>Jour</b> : « aujourd'hui », « demain », ou une date (2026-10-01)\n" +
-  "<b>Commandes</b> : /matchs (liste du jour), /podium (top 3 du jour), /dates\n\n" +
-  "Exemples :\n" +
-  "• <code>buteur pointeur FLA</code>\n" +
-  "• <code>double chance outsider tout</code>\n" +
-  "• <code>2buts 3points CAR demain</code>";
+  "🏒 <b>Bot NHL Pronos</b> — mêmes données que le site, sans cote.\n\n" +
+  "<b>Commandes</b>\n" +
+  "/start — menu mini-app (boutons)\n" +
+  "/matchs — liste des matchs du jour\n" +
+  "/podium — top 3 du jour\n" +
+  "/buteur — top 3 buteurs par équipe\n" +
+  "/passeur — top 3 passeurs par équipe\n" +
+  "/pointeur — top 3 pointeurs par équipe\n" +
+  "/outsider — outsiders justifiés du jour\n" +
+  "/doublechance — 1 des 2 buteurs marque\n" +
+  "/triplechance — 1 des 3 buteurs marque\n" +
+  "/demain — analyse de demain\n" +
+  "/dates — jours analysés\n" +
+  "/aide — cette aide\n\n" +
+  "<b>Texte libre</b> — combine comme tu veux :\n" +
+  "• filtres : buteur, passeur, pointeur, 2buts, 3buts, 2points, 3points, " +
+  "double chance, triple chance, outsider\n" +
+  "• matchs : une équipe (FLA, CAR…), « match 3 », ou « tout »\n" +
+  "• jour : aujourd'hui, demain, ou une date (2026-10-01)\n\n" +
+  "Exemples : « buteur pointeur FLA » · « double chance outsider tout » · " +
+  "« 2buts 3points CAR demain »";
 
 /* ---------- mini-app : boutons inline (état porté par callback_data) ----------
    état = <codes marchés>@<index du jour dans dates()>, ex. "13@0" =

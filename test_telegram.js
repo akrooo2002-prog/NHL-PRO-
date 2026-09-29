@@ -128,7 +128,7 @@ async function clique(data, userId) {
   const defaut = ds.find((x) => x >= t0) || ds[ds.length - 1];
   ok(date2 === ds[Math.min(ds.indexOf(defaut) + 1, ds.length - 1)], "« demain » pris en compte dans les résultats");
   const a = await clique("A");
-  ok(a.textes.includes("Filtres") && a.textes.includes("outsider"), "❓ Aide → texte d'aide");
+  ok(a.textes.includes("Commandes") && a.textes.includes("outsider"), "❓ Aide → texte d'aide");
 
   /* ---------- le texte libre marche toujours ---------- */
   const q1 = await dire("buteur outsider FLA");
@@ -153,6 +153,32 @@ async function clique(data, userId) {
      "requête maximale : " + q7.morceaux + " messages, tous ≤ 4096");
   const toutesData = ["F:1234567890@34", "T:1234567890@34:0", "S:1234567890@34:15", "L:1234567890@34", "D:1234567890@34", "K:1234567890@34"];
   ok(toutesData.every((d) => d.length <= 64), "callback_data ≤ 64 octets (limite Telegram)");
+
+  /* ---------- toutes les commandes slash ---------- */
+  const cB = await dire("/buteur");
+  ok(cB.textes.includes("BUTEUR") && !cB.textes.includes("PASSEUR"), "/buteur → buteurs seulement");
+  const cP = await dire("/passeur");
+  ok(cP.textes.includes("PASSEUR"), "/passeur → passeurs");
+  const cPt = await dire("/pointeur");
+  ok(cPt.textes.includes("POINTEUR"), "/pointeur → pointeurs");
+  const cO = await dire("/outsider");
+  ok(cO.textes.includes("OUTSIDERS"), "/outsider → outsiders justifiés");
+  const cD = await dire("/doublechance");
+  ok(cD.textes.includes("DOUBLE CHANCE") && cD.textes.includes("🎲"), "/doublechance → 1 des 2");
+  const cT = await dire("/triplechance");
+  ok(cT.textes.includes("TRIPLE CHANCE"), "/triplechance → 1 des 3");
+  const cDem = await dire("/demain");
+  const dateDem = (cDem.textes.match(/📅 <b>([\d-]+)<\/b>/) || [])[1];
+  ok(dateDem === ds[Math.min(ds.indexOf(defaut) + 1, ds.length - 1)], "/demain → jour suivant");
+  const cA = await dire("/aide");
+  ok(cA.textes.includes("Commandes") && cA.textes.includes("/doublechance") && cA.textes.includes("outsider"),
+     "/aide → liste complète des commandes");
+  const cM = await dire("/matchs");
+  ok(/1\. [A-Z]{2,4} @ [A-Z]{2,4}/.test(cM.textes), "/matchs → liste du jour");
+  const cPod = await dire("/podium");
+  ok(cPod.textes.includes("🥇"), "/podium → top 3");
+  const cDa = await dire("/dates");
+  ok((cDa.textes.match(/20\d\d-\d\d-\d\d/g) || []).length >= 5, "/dates → jours analysés");
 
   console.log(echecs === 0 ? "RESULTAT BOT TELEGRAM : TOUT EST OK (" + n + " vérifications)"
                            : "RESULTAT BOT TELEGRAM : " + echecs + " ECHECS / " + n);
