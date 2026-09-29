@@ -981,11 +981,15 @@ async function rSelect(m){
   MK7.forEach(([k,lab])=>bar.appendChild(chkSel(k,lab)));
   bar.appendChild(chkSel("doubleChance","Double chance buteur (1 des 2)"));
   bar.appendChild(chkSel("tripleChance","Triple chance buteur (1 des 3)"));
+  bar.appendChild(chkSel("duo15","Duo 1,5 buts (2+ à deux)"));
+  bar.appendChild(chkSel("trio15","Trio 1,5 buts (2+ à trois)"));
+  bar.appendChild(chkSel("outsiderButeur","Outsider buteur"));
+  bar.appendChild(chkSel("outsiderPointeur","Outsider pointeur"));
   m.appendChild(bar);
   const mks=MK7.filter(([k])=>S.sel[k]);
   const games=dayPicker(m);
   if(!games.length){ m.appendChild(el("div","card",'<p class="note">Aucun match ce jour-là.</p>')); return; }
-  if(!mks.length&&!S.sel.doubleChance&&!S.sel.tripleChance){ m.appendChild(el("div","card",'<p class="note">Coche au moins un marché ci-dessus.</p>')); return; }
+  if(!mks.length&&!["doubleChance","tripleChance","duo15","trio15","outsiderButeur","outsiderPointeur"].some(k=>S.sel[k])){ m.appendChild(el("div","card",'<p class="note">Coche au moins un marché ci-dessus.</p>')); return; }
   games.forEach(g=>{
     const c=el("div","card"+(g.preseason?" fallback":""));
     c.innerHTML='<div class="ghead">'
@@ -1019,7 +1023,9 @@ async function rSelect(m){
       });
     });
     [["doubleChance","double","🎲 Double chance buteur — le pari passe si l'un des 2 marque"],
-     ["tripleChance","triple","🎲 Triple chance buteur — le pari passe si l'un des 3 marque"]].forEach(([key,nk,lab])=>{
+     ["tripleChance","triple","🎲 Triple chance buteur — le pari passe si l'un des 3 marque"],
+     ["duo15","duo15","⚔️ Duo 1,5 buts — le pari passe si les 2 cumulent 2+ buts"],
+     ["trio15","trio15","⚔️ Trio 1,5 buts — le pari passe si les 3 cumulent 2+ buts"]].forEach(([key,nk,lab])=>{
       if(!S.sel[key]) return;
       c.appendChild(el("div","mk",lab));
       [["away",g.away],["home",g.home]].forEach(([side,ab])=>{
@@ -1029,12 +1035,35 @@ async function rSelect(m){
           +esc(ab)+" — top "+cb.members.length+" buteurs</span>"));
         const row=el("div","pick "+(side==="away"?"bA":"bH"));
         row.style.padding="6px 8px";
+        const sep=(key==="duo15"||key==="trio15")?" + ":" <span class=mut>ou</span> ";
         row.innerHTML='<div class="b"><div class="t">'
           +'<span class="st">'+esc(cb.etoiles)+'</span> '
-          +'<span class="n">'+cb.members.map(x=>esc(x.name)).join(" <span class=mut>ou</span> ")+'</span> '
+          +'<span class="n">'+cb.members.map(x=>esc(x.name)).join(sep)+'</span> '
           +confBadge(cb)
           +'<span class="pr">'+pcent(cb.prob)+'</span></div>'
           +'<div class="why">'+cb.members.map(x=>esc(x.name)+" "+pcent(x.prob)).join(" · ")+'</div></div>';
+        row.onclick=()=>goDetail(g.id);
+        c.appendChild(row);
+      });
+    });
+    [["outsiderButeur","outsidersButeur","🎯 Outsider buteur — de la valeur hors du top 3, justifiée"],
+     ["outsiderPointeur","outsidersPointeur","🎯 Outsider pointeur — de la valeur hors du top 3, justifiée"]].forEach(([key,gk,lab])=>{
+      if(!S.sel[key]) return;
+      const list=g[gk]||[];
+      if(!list.length) return;                    // personne d'éligible → rien, comme dans la fiche
+      c.appendChild(el("div","mk",lab));
+      list.forEach(o=>{
+        const away=o.abbr===g.away;
+        const row=el("div","pick "+(away?"bA":"bH"));
+        row.style.padding="6px 8px";
+        row.innerHTML='<div class="b"><div class="t">'
+          +'<span class="st">'+esc(o.etoiles||"")+'</span> '
+          +'<span class="n">'+esc(o.name)+'</span> '
+          +'<span class="pill '+(away?"tA":"tH")+'">'+esc(o.abbr)+'</span> '
+          +'<span class="pill">'+esc(o.mk)+" n°"+o.rank+'</span>'
+          +confBadge(o)
+          +'<span class="pr">'+pcent(o.prob)+'</span></div>'
+          +'<div class="why">'+esc(o.why)+'</div></div>';
         row.onclick=()=>goDetail(g.id);
         c.appendChild(row);
       });

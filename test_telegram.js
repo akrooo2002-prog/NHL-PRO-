@@ -148,7 +148,7 @@ async function clique(data, userId) {
   ok((q6.textes.match(/20\d\d-\d\d-\d\d/g) || []).length >= 5, "texte libre : /dates");
 
   /* ---------- limites Telegram ---------- */
-  const q7 = await dire("buteur passeur pointeur 2buts 3buts 2points 3points double chance triple chance outsider tout");
+  const q7 = await dire("buteur passeur pointeur 2buts 3buts 2points 3points double chance triple chance duo trio outsider outsider buteur outsider pointeur tout");
   ok(envois().every((e) => e.text.length <= 4096) && q7.morceaux >= 1,
      "requête maximale : " + q7.morceaux + " messages, tous ≤ 4096");
   const toutesData = ["F:1234567890@34", "T:1234567890@34:0", "S:1234567890@34:15", "L:1234567890@34", "D:1234567890@34", "K:1234567890@34"];
@@ -179,6 +179,38 @@ async function clique(data, userId) {
   ok(cPod.textes.includes("🥇"), "/podium → top 3");
   const cDa = await dire("/dates");
   ok((cDa.textes.match(/20\d\d-\d\d-\d\d/g) || []).length >= 5, "/dates → jours analysés");
+
+  /* ---------- nouveaux filtres : duo/trio 1,5 buts + outsiders par marché ---------- */
+  const cDuo = await dire("duo trio tout");
+  ok(cDuo.textes.includes("DUO 1,5 BUTS") && cDuo.textes.includes("TRIO 1,5 BUTS"),
+     "« duo trio » → blocs 2+ buts cumulés");
+  ok(cDuo.textes.includes("⚔️") && / \+ /.test(cDuo.textes), "duo/trio : noms joints par « + »");
+  const cOB = await dire("outsider buteur tout");
+  ok(cOB.textes.includes("OUTSIDER BUTEUR") && !cOB.textes.includes("OUTSIDER POINTEUR"),
+     "« outsider buteur » → marché buteur seul (pas de confusion avec buteur seul)");
+  ok(/OUTSIDER BUTEUR[\s\S]*?n°\d/.test(cOB.textes), "outsider buteur : rang affiché");
+  const cOP = await dire("outsider pointeur tout");
+  ok(cOP.textes.includes("OUTSIDER POINTEUR"), "« outsider pointeur »");
+  const cSD = await dire("/duo");
+  ok(cSD.textes.includes("DUO 1,5"), "/duo → bloc duo");
+  const cST = await dire("/trio");
+  ok(cST.textes.includes("TRIO 1,5"), "/trio → bloc trio");
+  const cSOB = await dire("/outsiderbuteur");
+  ok(cSOB.textes.includes("OUTSIDER BUTEUR"), "/outsiderbuteur");
+  const cSOP = await dire("/outsiderpointeur");
+  ok(cSOP.textes.includes("OUTSIDER POINTEUR"), "/outsiderpointeur");
+  const f2 = await clique("F:13@0");
+  const txtB = btns(f2.clavier).map((b) => b.split("|")[0]).join(" ");
+  ok(txtB.includes("Duo 1,5") && txtB.includes("Trio 1,5") && txtB.includes("Outsider buteur")
+     && txtB.includes("Outsider pointeur"), "clavier ⚙️ : les 4 nouveaux filtres sont cochables");
+  const tg1 = await clique("T:13@0:c");
+  ok(btns(tg1.clavier).some((b) => b.startsWith("✅ Duo")), "bouton : cocher Duo 1,5 buts");
+  const lAll = await clique("L:1234567890cdab@0");
+  ok(lAll.textes.includes("DUO 1,5") && lAll.textes.includes("TRIO 1,5")
+     && lAll.textes.includes("OUTSIDER BUTEUR") && lAll.textes.includes("OUTSIDER POINTEUR"),
+     "🚀 tout coché → les 14 filtres d'un coup");
+  ok(["T:1234567890cdab@34:0", "L:1234567890cdab@34", "S:1234567890cdab@34:15"].every((d) => d.length <= 64),
+     "callback_data 14 filtres ≤ 64 octets");
 
   console.log(echecs === 0 ? "RESULTAT BOT TELEGRAM : TOUT EST OK (" + n + " vérifications)"
                            : "RESULTAT BOT TELEGRAM : " + echecs + " ECHECS / " + n);

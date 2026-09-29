@@ -48,6 +48,10 @@ const MARCHES = [
   ["triplePointeur", "Triple pointeur (3+ points)", ["3points", "3+point", "3+ point", "triplepointeur", "triple pointeur"]],
   ["doubleChance", "Double chance buteur (1 des 2)", ["doublechance", "double chance", "dchance", "2chances", "2 chances"]],
   ["tripleChance", "Triple chance buteur (1 des 3)", ["triplechance", "triple chance", "tchance", "3chances", "3 chances"]],
+  ["duo15", "Duo 1,5 buts (2+ à deux)", ["duo", "duo15", "duo 1.5", "duo 1,5", "duobuts"]],
+  ["trio15", "Trio 1,5 buts (2+ à trois)", ["trio", "trio15", "trio 1.5", "trio 1,5", "triobuts"]],
+  ["outsiderButeur", "Outsider buteur", ["outsider buteur", "outsiders buteur", "outsiderbuteur", "outsidersbuteur"]],
+  ["outsiderPointeur", "Outsider pointeur", ["outsider pointeur", "outsiders pointeur", "outsiderpointeur", "outsiderspointeur"]],
   ["outsider", "Outsiders justifiés", ["outsider", "outsiders"]],
 ];
 const MK_SIMPLE = ["buteur", "passeur", "pointeur", "doubleButeur", "tripleButeur", "doublePointeur", "triplePointeur"];
@@ -64,12 +68,17 @@ const AIDE =
   "/outsider — outsiders justifiés du jour\n" +
   "/doublechance — 1 des 2 buteurs marque\n" +
   "/triplechance — 1 des 3 buteurs marque\n" +
+  "/duo — 2+ buts cumulés par les 2 meilleurs\n" +
+  "/trio — 2+ buts cumulés par les 3 meilleurs\n" +
+  "/outsiderbuteur — outsider du marché buteur\n" +
+  "/outsiderpointeur — outsider du marché pointeur\n" +
   "/demain — analyse de demain\n" +
   "/dates — jours analysés\n" +
   "/aide — cette aide\n\n" +
   "<b>Texte libre</b> — combine comme tu veux :\n" +
   "• filtres : buteur, passeur, pointeur, 2buts, 3buts, 2points, 3points, " +
-  "double chance, triple chance, outsider\n" +
+  "double chance, triple chance, duo, trio, outsider, outsider buteur, " +
+  "outsider pointeur\n" +
   "• matchs : une équipe (FLA, CAR…), « match 3 », ou « tout »\n" +
   "• jour : aujourd'hui, demain, ou une date (2026-10-01)\n\n" +
   "Exemples : « buteur pointeur FLA » · « double chance outsider tout » · " +
@@ -80,10 +89,13 @@ const AIDE =
    buteur+pointeur, premier jour. Rien à stocker côté serveur : chaque bouton
    transporte l'état, la fonction reste sans mémoire (serverless). */
 const MK_CODE = { 1: "buteur", 2: "passeur", 3: "pointeur", 4: "doubleButeur", 5: "tripleButeur",
-                  6: "doublePointeur", 7: "triplePointeur", 8: "doubleChance", 9: "tripleChance", 0: "outsider" };
+                  6: "doublePointeur", 7: "triplePointeur", 8: "doubleChance", 9: "tripleChance",
+                  c: "duo15", d: "trio15", a: "outsiderButeur", b: "outsiderPointeur", 0: "outsider" };
 const MK_LIB = { 1: "Buteur 1+", 2: "Passeur 1+", 3: "Pointeur 1+", 4: "2+ buts", 5: "3+ buts",
-                 6: "2+ points", 7: "3+ points", 8: "Double chance", 9: "Triple chance", 0: "Outsider" };
-const CODES = "1234567890";
+                 6: "2+ points", 7: "3+ points", 8: "Double chance", 9: "Triple chance",
+                 c: "Duo 1,5 buts", d: "Trio 1,5 buts", a: "Outsider buteur", b: "Outsider pointeur",
+                 0: "Outsiders (mixte)" };
+const CODES = "1234567890cdab";
 const ETAT_DEF = "13"; // buteur + pointeur, comme le site
 
 function decodeEtat(etat) {
@@ -189,11 +201,14 @@ function parseRequete(text, d) {
   if (md) q.date = md[0];
   // marchés (on retire les alias trouvés pour ne pas confondre avec les équipes)
   let reste = t;
-  for (const [k, , alias] of MARCHES) {
-    for (const a of alias) {
-      const re = new RegExp("(^|[^a-z])" + a.replace(/[+]/g, "\\+") + "([^a-z]|$)");
-      if (re.test(reste)) { reste = reste.replace(re, " "); if (!q.marches.includes(k)) q.marches.push(k); break; }
-    }
+  // alias triés du plus long au plus court : « outsider buteur » doit être
+  // reconnu avant « buteur » tout seul.
+  const aliasPlat = [];
+  MARCHES.forEach(([k, , alias]) => alias.forEach((a) => aliasPlat.push([a, k])));
+  aliasPlat.sort((x, y) => y[0].length - x[0].length);
+  for (const [a, k] of aliasPlat) {
+    const re = new RegExp("(^|[^a-z])" + a.replace(/[+.]/g, "\\$&").replace(/,/g, "[,.]") + "([^a-z]|$)");
+    if (re.test(reste)) { reste = reste.replace(re, " "); if (!q.marches.includes(k)) q.marches.push(k); }
   }
   if (/\bpodium\b/.test(reste)) { q.podium = true; }
   if (/\b(marches|marche|filtres?)\b/.test(reste)) { q.aide = true; } // liste des filtres dispo
@@ -246,6 +261,27 @@ function blocMatch(g, marches) {
           + " n°" + o.rank + " · " + pct(o.prob) + " " + (o.etoiles || "")
           + "\n   " + esc(o.why)));
       }
+      continue;
+    }
+    if (mk === "duo15" || mk === "trio15") {
+      const lab = MARCHES.find((m) => m[0] === mk)[1].toUpperCase();
+      const lignes = [];
+      [["away", "🔵"], ["home", "🔴"]].forEach(([side, ic]) => {
+        const cb = g.combos && g.combos[side] && g.combos[side][mk];
+        if (!cb) return;
+        lignes.push(" " + ic + " " + esc(cb.members.map((x) => x.name).join(" + "))
+          + "\n   → " + pct(cb.prob) + " " + (cb.etoiles || "") + " (indice " + f1(cb.confidence) + ")");
+      });
+      if (lignes.length) { L.push("<b>" + lab + "</b> ⚔️"); L.push(...lignes); }
+      continue;
+    }
+    if (mk === "outsiderButeur" || mk === "outsiderPointeur") {
+      const liste = g[mk === "outsiderButeur" ? "outsidersButeur" : "outsidersPointeur"] || [];
+      if (!liste.length) continue;                // personne d'éligible → pas de bloc
+      L.push("<b>" + MARCHES.find((m) => m[0] === mk)[1].toUpperCase() + "</b> 🎯");
+      liste.forEach((o) => L.push(" • " + esc(o.name) + " (" + esc(o.abbr) + ") — " + esc(o.mk)
+        + " n°" + o.rank + " · " + pct(o.prob) + " " + (o.etoiles || "")
+        + "\n   " + esc(o.why)));
       continue;
     }
     if (mk === "doubleChance" || mk === "tripleChance") {
@@ -315,7 +351,8 @@ async function traite(text) {
   if (!marches.length) marches = ["buteur", "pointeur"]; // défaut = celui du site
   return morceauxResultats(date, jeux, ordonneMk(marches));
 }
-const ORDRE_MK = [...MK_SIMPLE, "doubleChance", "tripleChance", "outsider"];
+const ORDRE_MK = [...MK_SIMPLE, "doubleChance", "tripleChance", "duo15", "trio15",
+                  "outsiderButeur", "outsiderPointeur", "outsider"];
 const ordonneMk = (m) => m.slice().sort((a, b) => ORDRE_MK.indexOf(a) - ORDRE_MK.indexOf(b));
 function morceauxResultats(date, jeux, marches) {
   const entete = "📅 <b>" + esc(date) + "</b> · " + jeux.length + " match" + (jeux.length > 1 ? "s" : "");
