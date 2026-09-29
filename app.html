@@ -681,6 +681,11 @@ const lireHash=()=>{const h=(typeof location!=="undefined"&&location.hash)||"";
   const m=/^#\/match\/(\d+)$/.exec(h);return m?Number(m[1]):null;};
 
 /* ===== vague 9 : filtres, marchés à seuils, événements joueur ===== */
+/* tri du tableau de la fiche : clic = décroissant, re-clic = inversé */
+function triCol(k){
+  if(S.sort.k===k) S.sort.d=-S.sort.d; else S.sort={k:k,d:-1};
+  if(S.drawTable) S.drawTable();
+}
 const MK7=[["buteur","Buteur (1+ but)"],["passeur","Passeur (1+ passe)"],["pointeur","Pointeur (1+ point)"],
   ["doubleButeur","Double buteur (2+ buts)"],["tripleButeur","Triple buteur (3+ buts)"],
   ["doublePointeur","Double pointeur (2+ points)"],["triplePointeur","Triple pointeur (3+ points)"]];
@@ -1178,8 +1183,31 @@ async function rDetail(m){
     m.appendChild(box);
   });
 
-  /* --- tableau complet --- */
-  m.appendChild(el("h2","sec","Tous les joueurs ("+g.players.length+")"));
+  /* --- outsiders : uniquement s'il y en a, toujours justifiés --- */
+  if((g.outsiders||[]).length){
+    const ob=el("div","card");
+    ob.innerHTML="<h3>🎯 Outsider"+(g.outsiders.length>1?"s":"")
+      +" <span class='more'>de la valeur hors des favoris — justifié</span></h3>";
+    g.outsiders.forEach(o=>{
+      const away=o.abbr===g.away;
+      const row=el("div","pick "+(away?"bA":"bH"));
+      const t=el("div","t");
+      t.innerHTML='<span class="st">'+esc(o.etoiles||"")+'</span> '
+        +'<span class="n">'+esc(o.name)+'</span> '
+        +'<span class="pill '+(away?"tA":"tH")+'">'+esc(o.abbr)+'</span> '
+        +'<span class="pill">'+esc(o.mk)+" n°"+o.rank+'</span>'
+        +'<span class="conf c'+(o.palier||1)+'">'+f1(o.confidence)+'</span>'
+        +'<span class="pr">'+pcent(o.prob)+'</span>';
+      const b=el("div","b"); b.appendChild(t);
+      b.appendChild(el("div","why",esc(o.why)));
+      row.appendChild(b);
+      ob.appendChild(row);
+    });
+    m.appendChild(ob);
+  }
+
+  /* --- tableau complet (colonnes triables) --- */
+  m.appendChild(el("h2","sec","Tous les joueurs ("+g.players.length+") — clique sur une colonne pour trier"));
   const ctl=el("div","ctl");
   const fi=el("input"); fi.type="text"; fi.placeholder="Filtrer…"; fi.style.width="auto"; fi.style.flex="1";
   const fs=el("select"); fs.style.width="auto";
@@ -1193,6 +1221,7 @@ async function rDetail(m){
     ["pts","Pt/M"],["form","5 dern."],["lg","Buts att."],["lp","Pts att."],
     ["g2","2+ buts"],["p2","2+ pts"],["p3","3+ pts"],
     ["prob","Prob."],["conf","Indice"],["pal","Palier"]];
+  S.drawTable=draw;
   function draw(){
     const q=fi.value.trim().toLowerCase();
     const mode=fs.selectedIndex;
@@ -1208,7 +1237,9 @@ async function rDetail(m){
     rows.sort((a,b)=>{const x=val(a),y=val(b);
       if(typeof x==="string") return dir*String(x).localeCompare(String(y),"fr");
       return dir*((x||0)-(y||0));});
-    tb.innerHTML="<thead><tr>"+COLS.map(([k,l])=>"<th>"+esc(l)+"</th>").join("")+"</tr></thead><tbody>"
+    const sk=S.sort.k||"conf", sd=S.sort.d||-1;
+    tb.innerHTML="<thead><tr>"+COLS.map(([k,l])=>"<th style=\"cursor:pointer\" onclick=\"triCol('"+k+"')\">"
+      +esc(l)+(k===sk?(sd<0?" ▼":" ▲"):"")+"</th>").join("")+"</tr></thead><tbody>"
       +rows.map(p=>"<tr><td>"+esc(p.name)+" <span class='pill "+(p.abbr===g.away?"tA":"tH")+"'>"+esc(p.abbr)+"</span>"
         +(p.recrue?" <span class='pill n'>recrue</span>":"")+evTags(p)+"</td><td>"+esc(p.pos||"—")+"</td>"
         +"<td class='n'>"+(p.gp||0)+"</td><td class='n'>"+f1(p.raw.toiMin)+"</td>"

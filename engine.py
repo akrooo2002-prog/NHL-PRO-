@@ -385,13 +385,60 @@ def run(raw):
             for i, p in enumerate(ranked):
                 p[mk]["rank"] = i + 1
 
+        # ---------- outsiders : de la valeur réelle hors des favoris ----------
+        # Un outsider = hors du top 3, mais classé (rang 4-12), indice solide (>= 45)
+        # et AU MOINS un signal chiffré : forme, adversaire qui lui réussit,
+        # régression favorable, palier de carrière. Sans signal, pas d'outsider.
+        outsiders = []
+        top3 = {p["id"] for mkt in ("buteur", "pointeur")
+                for p in players if p[mkt]["rank"] and p[mkt]["rank"] <= 3}
+        for p in players:
+            if p["id"] in top3 or "absent" in p["flags"] or p.get("recrue"):
+                continue
+            mkt = ("pointeur" if (p["pointeur"]["confidence"] or 0) >=
+                   (p["buteur"]["confidence"] or 0) else "buteur")
+            conf = p[mkt]["confidence"] or 0
+            if conf < 45 or not p[mkt]["rank"] or not (4 <= p[mkt]["rank"] <= 12):
+                continue
+            bits = []
+            f5 = p["form"] or {}
+            if (f5.get("n") or 0) >= 3 and (f5.get("pts") or 0) >= max(0.6, (p["perGame"]["pts"] or 0) * 1.25):
+                bits.append(f"forme forte ({f2(f5['pts'])} pts/match sur ses {f5['n']} derniers, "
+                            f"saison {f2(p['perGame']['pts'])})")
+            h = p["h2h"] or {}
+            if (h.get("n") or 0) >= 3 and (h.get("pts") or 0) >= max(0.5, (p["perGame"]["pts"] or 0) * 1.2):
+                bits.append(f"réussit contre {p['opp']} ({f2(h['pts'])} pts/match sur {h['n']} matchs)")
+            if (p.get("regressionRisk") or 0) < -6 and p["raw"].get("expShPct"):
+                bits.append(f"% de tir froid ({pc(p['raw']['shPct'])}) sous son attendu "
+                            f"({pc(p['raw']['expShPct'])}) : la remontée joue pour lui")
+            if "en_hausse" in p["flags"]:
+                bits.append("en hausse nette sur 5 matchs")
+            ms = (p["milestones"] or {}).get("pts") or {}
+            if ms.get("gap") and ms["gap"] <= 3 and (ms.get("next") or 0) >= 100:
+                bits.append(f"à {ms['gap']} points de {ms['next']} en carrière : il va les chercher")
+            if not bits:
+                continue
+            outsiders.append({"id": p["id"], "name": p["name"], "abbr": p["abbr"],
+                              "mk": mkt, "rank": p[mkt]["rank"],
+                              "prob": p[mkt]["prob"], "confidence": conf,
+                              "palier": p[mkt]["palier"], "etoiles": p[mkt]["etoiles"],
+                              "why": " ; ".join(bits[:2]) + "."})
+        outsiders.sort(key=lambda x: -x["confidence"])
+        retenus = []
+        if outsiders:
+            retenus.append(outsiders[0])
+            reste = [x for x in outsiders[1:] if x["abbr"] != retenus[0]["abbr"]]
+            autre = reste[0] if reste else (outsiders[1] if len(outsiders) > 1 else None)
+            if autre and autre["confidence"] >= retenus[0]["confidence"] - 10:
+                retenus.append(autre)
+
         games_out.append({
             "id": g["id"], "date": g["date"], "startUtc": g["startUtc"],
             "gameType": g["gameType"], "preseason": preseason,
             "away": g["away"], "home": g["home"],
             "awayNameFr": ctx["away"]["nameFr"], "homeNameFr": ctx["home"]["nameFr"],
             "venue": g.get("venue"), "ctx": ctx, "players": players,
-            "compo": g.get("compo"),
+            "compo": g.get("compo"), "outsiders": retenus,
         })
 
     out = {
