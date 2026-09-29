@@ -64,6 +64,11 @@ jobs:
           sed -i "s|__GH_REPO__|${{ github.repository }}|; s|__GH_PAT__|${{ secrets.GH_PAT }}|" \
             dist/netlify/functions/refresh.js
           grep -q "__GH_PAT__" dist/netlify/functions/refresh.js && { echo "injection échouée"; exit 1; }
+          # bot Telegram : token, secret webhook et propriétaire injectés depuis
+          # les secrets du dépôt (jamais en clair au dépôt)
+          sed -i "s|__TG_TOKEN__|${{ secrets.TELEGRAM_BOT_TOKEN }}|; s|__TG_SECRET__|${{ secrets.TELEGRAM_WEBHOOK_SECRET }}|; s|__TG_OWNER__|${{ secrets.TELEGRAM_OWNER_ID }}|" \
+            dist/netlify/functions/telegram.js
+          grep -q "__TG_" dist/netlify/functions/telegram.js && { echo "injection telegram échouée"; exit 1; }
           # adresse du proxy Live / Rafraîchir :
           #   · functions Netlify même origine ("/") par défaut ;
           #   · ou Worker Cloudflare si la variable WORKER_URL est définie.

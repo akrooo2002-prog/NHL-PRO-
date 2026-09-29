@@ -8,9 +8,13 @@
 //   TELEGRAM_WEBHOOK_SECRET   — recommandé, secret du webhook (anti-abus)
 //   TELEGRAM_OWNER_ID         — optionnel : si défini, seul ce chat est servi
 const DATA = process.env.DATA_URL || "https://nhl-pronos-pro.netlify.app";
-const TOKEN = () => process.env.TELEGRAM_BOT_TOKEN || "";
-const SECRET = () => process.env.TELEGRAM_WEBHOOK_SECRET || "";
-const OWNER = () => process.env.TELEGRAM_OWNER_ID || "";
+// En prod, GitHub Actions remplace les __TG_*__ par les secrets du dépôt au
+// build (même principe que __GH_PAT__ dans refresh.js) ; en local/test, ce
+// sont les variables d'environnement qui priment.
+const cfg = (v) => (v && v.indexOf("__TG") !== 0 ? v : "");
+const TOKEN = () => process.env.TELEGRAM_BOT_TOKEN || cfg("__TG_TOKEN__");
+const SECRET = () => process.env.TELEGRAM_WEBHOOK_SECRET || cfg("__TG_SECRET__");
+const OWNER = () => process.env.TELEGRAM_OWNER_ID || cfg("__TG_OWNER__");
 
 const CORS = { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json; charset=utf-8" };
 const j = (code, obj) => ({ statusCode: code, headers: CORS, body: JSON.stringify(obj) });
