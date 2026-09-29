@@ -143,6 +143,7 @@ const note = (cond, label, extra = "") => {
   const nJoueurs = S.d.games[0].players.length;
   for (const [name, fn, tag, min] of [["podium", sandbox.rPodium, "DIV", 200],
                                       ["matchs", sandbox.rMatchs, "DIV", 200],
+                                      ["select", sandbox.rSelect, "DIV", 60],
                                       ["methode", sandbox.rMethode, "TR", 6]]) {
     const m = new FakeEl("div");
     let err = null;

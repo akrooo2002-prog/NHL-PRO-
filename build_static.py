@@ -78,8 +78,11 @@ def main(argv):
     jours = {}
     for g in d["games"]:
         gardes = set()
-        for mk in MKS:
-            classes = [x for x in g["players"] if x[mk]["rank"]]
+        # les marchés à seuils aussi : l'onglet « Marchés » affiche le top 3 par
+        # équipe sur les 7 marchés, il faut ces joueurs dans le fichier jour
+        for mk in list(MKS) + ["doubleButeur", "tripleButeur",
+                               "doublePointeur", "triplePointeur"]:
+            classes = [x for x in g["players"] if x.get(mk) and x[mk].get("rank")]
             classes.sort(key=lambda x: x[mk]["rank"])
             gardes.update(x["id"] for x in classes[:TOP_JOUR])
 
