@@ -26,3 +26,8 @@
   from = "/collecter"
   to = "/.netlify/functions/collecter"
   status = 200
+
+[[redirects]]
+  from = "/telegram"
+  to = "/.netlify/functions/telegram"
+  status = 200
