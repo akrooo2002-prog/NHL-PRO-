@@ -15,6 +15,12 @@ const cfg = (v) => (v && v.indexOf("__TG") !== 0 ? v : "");
 const TOKEN = () => process.env.TELEGRAM_BOT_TOKEN || cfg("__TG_TOKEN__");
 const SECRET = () => process.env.TELEGRAM_WEBHOOK_SECRET || cfg("__TG_SECRET__");
 const OWNER = () => process.env.TELEGRAM_OWNER_ID || cfg("__TG_OWNER__");
+// Liste d'accès : un ou plusieurs identifiants Telegram séparés par des virgules.
+// Vide = ouvert à tous (développement uniquement).
+const autorise = (id) => {
+  const liste = OWNER().split(",").map((x) => x.trim()).filter(Boolean);
+  return !liste.length || liste.includes(String(id));
+};
 
 const CORS = { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json; charset=utf-8" };
 const j = (code, obj) => ({ statusCode: code, headers: CORS, body: JSON.stringify(obj) });
@@ -394,12 +400,14 @@ async function handler(event) {
   if (SECRET() && sec !== SECRET()) return j(401, { ok: false });
   let up;
   try { up = JSON.parse(event.body || "{}"); } catch (e) { return j(200, { ok: false }); }
-  const owner = OWNER();
 
   // ---- clic sur un bouton (mini-app) ----
   const cbq = up.callback_query;
   if (cbq && cbq.message) {
-    if (owner && String((cbq.from || {}).id) !== String(owner)) return j(200, { ok: true });
+    if (!autorise((cbq.from || {}).id)) {
+      try { await tg("answerCallbackQuery", { callback_query_id: cbq.id, text: "🔒 Accès privé", show_alert: true }); } catch (e) { /* tant pis */ }
+      return j(200, { ok: true, ignore: true });
+    }
     try {
       await tg("answerCallbackQuery", { callback_query_id: cbq.id });
       const d = await index();
@@ -421,7 +429,13 @@ async function handler(event) {
 
   const msg = up.message || up.edited_message;
   if (!msg || !msg.text) return j(200, { ok: true });           // stickers, photos, canaux…
-  if (owner && String(msg.chat.id) !== String(owner)) return j(200, { ok: true }); // accès restreint
+  if (!autorise(msg.chat.id)) {                                 // accès restreint : on lui donne son ID
+    try {
+      await envoie(msg.chat.id, ["🔒 <b>Accès privé.</b>\nTon identifiant Telegram : <code>"
+        + esc(msg.chat.id) + "</code>\nEnvoie-le à Amine pour qu'il autorise ton accès."]);
+    } catch (e) { /* tant pis */ }
+    return j(200, { ok: true, ignore: true });
+  }
   const mot0 = (na(String(msg.text)).match(/^\/?([a-z]+)/) || [])[1];
   try {
     if (mot0 === "start") {                                    // /start → la mini-app

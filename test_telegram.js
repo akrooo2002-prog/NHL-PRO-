@@ -57,9 +57,17 @@ async function clique(data, userId) {
   const bad = await handler({ httpMethod: "POST", headers: {}, body: JSON.stringify({ message: { chat: { id: 4242 }, text: "buteur" } }) });
   ok(bad.statusCode === 401, "webhook : secret invalide → 401");
   const autre = await dire("buteur", 999);
-  ok(autre.r.statusCode === 200 && autre.morceaux === 0, "accès restreint : autre chat ignoré");
+  ok(autre.r.statusCode === 200 && autre.textes.includes("Accès privé") && autre.textes.includes("999"),
+     "accès restreint : l'inconnu reçoit son ID pour demander l'accès");
+  ok(!autre.textes.includes("BUTEUR"), "accès restreint : aucune donnée pour l'inconnu");
   const autreCb = await clique("F:13@0", 999);
-  ok(autreCb.r.statusCode === 200 && autreCb.edite.length === 0, "accès restreint : autre utilisateur ignoré sur les boutons");
+  ok(autreCb.r.statusCode === 200 && autreCb.edite.length === 0
+     && apis.some((a) => a.methode === "answerCallbackQuery" && a.body && a.body.text === "🔒 Accès privé"),
+     "accès restreint : bouton → alerte « Accès privé », rien d'autre");
+  process.env.TELEGRAM_OWNER_ID = "4242,777";                  // liste d'accès multiple
+  const ami = await dire("podium", 777);
+  ok(ami.textes.includes("🥇"), "accès multiple : l'ami autorisé (777) reçoit les données");
+  process.env.TELEGRAM_OWNER_ID = "4242";
 
   /* ---------- /start = mini-app ---------- */
   const st = await dire("/start");
