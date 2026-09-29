@@ -80,6 +80,59 @@ def etoiles(n):
     return "★" * n + "☆" * (5 - n)
 
 
+def poisson_geq(lam, k):
+    """P(X >= k) pour une loi de Poisson de paramètre lam (somme partielle)."""
+    if lam <= 0:
+        return 0.0
+    s, t = 0.0, math.exp(-lam)
+    for i in range(k):
+        s += t
+        t *= lam / (i + 1)
+    return max(0.0, 1.0 - s)
+
+
+# Marchés « seuils » : 2+ buts / 3+ buts / 2+ points / 3+ points dans le match.
+# Barème d'étoiles propre : ces événements sont rares, le barème général des
+# marchés simples donnerait ★ à tout le monde.
+SEUILS_MK = {"doubleButeur": (2, "g"), "tripleButeur": (3, "g"),
+             "doublePointeur": (2, "pts"), "triplePointeur": (3, "pts")}
+BAREMES = {"doubleButeur": [(8, 5), (5, 4), (2.5, 3), (1, 2), (0, 1)],
+           "tripleButeur": [(3, 5), (2, 4), (1, 3), (0.5, 2), (0, 1)],
+           "doublePointeur": [(35, 5), (25, 4), (15, 3), (8, 2), (0, 1)],
+           "triplePointeur": [(12, 5), (8, 4), (4, 3), (2, 2), (0, 1)]}
+
+
+def palier_bareme(score, mk):
+    for seuil, n in BAREMES[mk]:
+        if score >= seuil:
+            return n
+    return 1
+
+
+def seuils_markets(rec, lam_g, lam_p, log, cap=None):
+    """Ajoute les 4 marchés à seuils au dossier joueur (mêmes λ que les
+    marchés simples : cohérence garantie entre « 1+ but » et « 2+ buts »)."""
+    for mk, (k, base) in SEUILS_MK.items():
+        lam = lam_g if base == "g" else lam_p
+        prob = round(poisson_geq(lam, k), 4)
+        score = js_round(100 * prob, 1)
+        pal = palier_bareme(score, mk)
+        if cap:
+            pal = min(cap, pal)
+        deja = n_log = 0
+        if log:
+            cle = "goals" if base == "g" else "points"
+            deja = sum(1 for x in log[:25] if (x.get(cle, 0) or 0) >= k)
+            n_log = min(len(log), 25)
+        unite = "but" if base == "g" else "point"
+        why = f"{k}+ {unite}s dans le match : {pc(prob, 1)} — attendu {dfr(lam, 2)} {unite}s."
+        if n_log:
+            why += f" Réalisé {deja} fois sur les {n_log} derniers matchs."
+        rec[mk] = {"score": score, "prob": prob, "lam": round(lam, 3),
+                   "confidence": 0.0, "palier": pal, "etoiles": etoiles(pal),
+                   "rank": None, "why": why}
+
+
 def f1(x):
     return "—" if x is None else f"{x:.1f}".replace(".", ",")
 
@@ -250,7 +303,7 @@ def run(raw):
             # part des tirs que le gardien adverse laisse passer, relative à la ligue
             goalie_f = clamp((1 - sv) / (1 - sv_avg), 0.5, 1.8) if sv else 1.0
             ctx[side] = {
-                "abbr": abbr, "opp": opp,
+                "abbr": abbr, "opp": opp, "date": g["date"],
                 "nameFr": (tindex.get(abbr) or {}).get("nameFr") or abbr,
                 "oppNameFr": (tindex.get(opp) or {}).get("nameFr") or opp,
                 "oppGa": st_opp.get("goalsAgainstPerGame"),
@@ -264,6 +317,25 @@ def run(raw):
                 "b2b": yest in play_dates.get(abbr, set()),
             }
 
+        # compos officielles (si publiées) : les rayés sont marqués absents
+        # et le gardien partant officiel remplace l'estimation
+        ov = (raw.get("overrides") or {}).get(str(g["id"])) or {}
+        absents_ov = {str(x) for x in (ov.get("absents") or [])}
+        ov_goalies = ov.get("goalies") or {}
+        for side in ("away", "home"):
+            pid = ov_goalies.get(side)
+            if not pid:
+                continue
+            gg = next((x for x in goalie_list.get(ctx[side]["abbr"], [])
+                       if x["playerId"] == pid and x.get("sv")), None)
+            if gg:
+                ctx[side]["goalie"] = {
+                    "name": gg["name"], "playerId": gg["playerId"], "sv": gg["sv"],
+                    "gaa": gg.get("gaa"), "gp": gg.get("gp"), "starts": None,
+                    "ofLast": None, "lastGame": None, "lastSv": None,
+                    "estimated": False}
+                ctx[side]["goalieF"] = clamp((1 - gg["sv"]) / (1 - sv_avg), 0.5, 1.8)
+
         players = []
         for side in ("away", "home"):
             ab = ctx[side]["abbr"]
@@ -273,6 +345,9 @@ def run(raw):
                     rec = player_record(p, ctx[side], sk_by_season, logs.get(str(p["id"]), []),
                                         active, ref, career, lg_sh_pct, bios, rookies, preseason)
                     if rec:
+                        if str(p["id"]) in absents_ov and "absent" not in rec["flags"]:
+                            rec["flags"].append("absent")
+                            rec["flags"].append("raye_compo")
                         players.append(rec)
 
         for mk in ("buteur", "passeur", "pointeur"):
@@ -296,12 +371,27 @@ def run(raw):
             for i, p in enumerate(ranked):
                 p[mk]["rank"] = i + 1
 
+        for mk in SEUILS_MK:
+            # indice affiché = même formule que les marchés simples ; le palier,
+            # lui, vient du barème propre au marché (BAREMES)
+            for p in players:
+                if p.get("recrue"):
+                    pass                       # indice déjà fixé par rookie_record
+                elif p[mk]["score"] > 0:
+                    p[mk]["confidence"] = js_round(
+                        confidence(p[mk]["prob"], p["gp"], p["flags"], preseason), 1)
+            ranked = sorted((p for p in players if p[mk]["score"] > 0),
+                            key=lambda p: (-p[mk]["score"], p["name"]))
+            for i, p in enumerate(ranked):
+                p[mk]["rank"] = i + 1
+
         games_out.append({
             "id": g["id"], "date": g["date"], "startUtc": g["startUtc"],
             "gameType": g["gameType"], "preseason": preseason,
             "away": g["away"], "home": g["home"],
             "awayNameFr": ctx["away"]["nameFr"], "homeNameFr": ctx["home"]["nameFr"],
             "venue": g.get("venue"), "ctx": ctx, "players": players,
+            "compo": g.get("compo"),
         })
 
     out = {
@@ -311,7 +401,7 @@ def run(raw):
                    "gaPerGame": round(ga_avg, 2), "shotsAgainst": round(sa_avg, 1),
                    "gfPerGame": round(gf_avg, 2), "pkPctAvg": round(pk_avg, 2)},
         "teams": tindex, "goalies": goalies, "goalieList": goalie_list,
-        "games": games_out, "paliers": PALIERS,
+        "games": games_out, "paliers": PALIERS, "baremes": BAREMES,
     }
     return out
 
@@ -450,6 +540,13 @@ def rookie_record(p, ctx, land, bio, lg_sh_pct, preseason):
                      "lam": round(lam, 3), "confidence": conf,
                      "palier": palier(conf), "etoiles": etoiles(palier(conf)),
                      "rank": None, "why": justify(kind, rec, ctx)}
+    seuils_markets(rec, lam_g, lam_p, [], cap=2)
+    for mk in SEUILS_MK:
+        rec[mk]["confidence"] = conf
+    bd = (bio or {}).get("birthDate") or (land or {}).get("birthDate") or ""
+    rec["events"] = {"anniv": bool(bd) and len(bd) == 10
+                     and bool(ctx.get("date")) and bd[5:] == ctx["date"][5:],
+                     "carGP": 0, "nth": 1}
     return rec
 
 def player_record(p, ctx, sk_by_season, log, active, ref, career, lg_sh_pct,
@@ -594,6 +691,14 @@ def player_record(p, ctx, sk_by_season, log, active, ref, career, lg_sh_pct,
                 "f": round(h2h_f, 2)},
         "goalieF": ctx["goalieF"], "oppGoalie": (ctx["goalie"] or {}).get("name"),
     }
+    # événements : anniversaire le jour du match, Xᵉ match NHL
+    bio_ev = bios.get(str(p["id"])) or {}
+    bd = bio_ev.get("birthDate") or ""
+    # la bio REST est parfois partielle : on garde le max des deux sources
+    car_gp = max(bio_ev.get("gamesPlayed") or 0, car.get("gp") or 0)
+    rec["events"] = {"anniv": bool(bd) and len(bd) == 10
+                     and bool(ctx.get("date")) and bd[5:] == ctx["date"][5:],
+                     "carGP": car_gp, "nth": (car_gp or 0) + 1}
     for kind in ("buteur", "passeur", "pointeur"):
         key, _ = UNITE[kind]
         # on stocke la probabilité arrondie à 4 décimales, et le score est calculé
@@ -606,6 +711,7 @@ def player_record(p, ctx, sk_by_season, log, active, ref, career, lg_sh_pct,
                      "prob": prob, "lam": round(lam, 3),
                      "confidence": 0.0, "palier": 1, "etoiles": "☆☆☆☆☆", "rank": None,
                      "why": justify(kind, rec, ctx)}
+    seuils_markets(rec, lam_g, lam_p, log)
     return rec
 
 

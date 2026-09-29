@@ -388,7 +388,9 @@ class Handler(BaseHTTPRequestHandler):
     def collecter(self, qs):
         """Analyse instantanée, étape 1 : la collecte NHL ciblée (2 équipes),
         sans le moteur — c'est le navigateur qui exécute engine.py (Pyodide).
-        Même contrat que la fonction Netlify /collecter."""
+        Même contrat que la fonction Netlify /collecter.
+        compo=1 : compos officielles (rayés absents + gardien partant) ;
+        check=1 : sonde légère « les compos sont-elles publiées ? »."""
         try:
             gid = int((qs.get("game") or ["0"])[0])
         except ValueError:
@@ -402,11 +404,43 @@ class Handler(BaseHTTPRequestHandler):
         if not game:
             return self.send(404, json.dumps(
                 {"erreur": "match introuvable à cette date"}).encode())
+        compo = None
+        if (qs.get("compo") or ["0"])[0] == "1" or (qs.get("check") or ["0"])[0] == "1":
+            bx = fp.get(f"{fp.WEB}/gamecenter/{gid}/boxscore") or {}
+            pbg = bx.get("playerByGameStats") or {}
+            equipes, publiee = {}, True
+            for side, abbr in (("awayTeam", game["away"]), ("homeTeam", game["home"])):
+                t = pbg.get(side) or {}
+                ids = [x["playerId"] for x in (t.get("forwards") or []) + (t.get("defense") or [])]
+                st = next((x for x in (t.get("goalies") or []) if x.get("starter")), None)
+                equipes[abbr] = {"joueurs": ids,
+                                 "partant": ({"playerId": st["playerId"],
+                                              "name": (st.get("name") or {}).get("default")}
+                                             if st else None)}
+                if not ids:
+                    publiee = False
+            if (qs.get("check") or ["0"])[0] == "1":
+                return self.send(200, json.dumps(
+                    {"publiee": publiee, "etat": bx.get("gameState")}).encode())
+            if publiee:
+                compo = {"publiee": True, "equipes": equipes}
         try:
             raw = fp.collecte_un_match(game)
         except Exception as exc:                                # noqa: BLE001
             return self.send(502, json.dumps(
                 {"erreur": f"collecte impossible : {exc}"}).encode())
+        if compo:
+            absents, goalies_ov = [], {}
+            for side, t in (("away", game["away"]), ("home", game["home"])):
+                r = raw["rosters"].get(t) or {}
+                tous = [p["id"] for p in (r.get("forwards") or []) + (r.get("defensemen") or [])]
+                actifs = set(compo["equipes"][t]["joueurs"])
+                absents.extend(x for x in tous if x not in actifs)
+                gk = compo["equipes"][t]["partant"]
+                if gk:
+                    goalies_ov[side] = gk["playerId"]
+            raw["overrides"] = {str(gid): {"absents": absents, "goalies": goalies_ov}}
+            raw["games"][0]["compo"] = compo
         return self.send(200, json.dumps(raw, ensure_ascii=False).encode())
 
     def file(self, name, ctype):

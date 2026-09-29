@@ -182,6 +182,30 @@ td.n{text-align:right;font-variant-numeric:tabular-nums}
 .bar{height:4px;border-radius:2px;background:#1c232c;overflow:hidden;margin-top:5px}
 .bar i{display:block;height:100%;background:var(--acc)}
 h2.sec{margin:22px 0 10px;font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:var(--mut)}
+/* ===== vague 9 : contraste par équipe, indice, filtres ===== */
+:root{--tmA:#3b82f6;--tmH:#ef4444;--tmAbg:rgba(59,130,246,.14);--tmHbg:rgba(239,68,68,.14)}
+.pill.tA{background:var(--tmAbg);color:#8ab6ff;border:1px solid rgba(59,130,246,.45)}
+.pill.tH{background:var(--tmHbg);color:#ff9d9d;border:1px solid rgba(239,68,68,.45)}
+.pick.bA{border-left:3px solid var(--tmA)}
+.pick.bH{border-left:3px solid var(--tmH)}
+.conf{display:inline-block;min-width:42px;text-align:center;padding:1px 7px;border-radius:999px;
+  font-weight:700;font-size:12px;margin-left:4px}
+.conf.c5{background:rgba(62,207,142,.18);color:#3ecf8e}
+.conf.c4{background:rgba(163,217,87,.16);color:#a3d957}
+.conf.c3{background:rgba(242,193,78,.16);color:#f2c14e}
+.conf.c2{background:rgba(255,176,32,.16);color:#ffb020}
+.conf.c1{background:rgba(255,95,109,.16);color:#ff5f6d}
+.filters{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}
+.filters label{display:inline-flex;align-items:center;gap:6px;background:var(--card2);
+  border:1px solid var(--line);border-radius:999px;padding:5px 11px;font-size:13px;
+  cursor:pointer;user-select:none}
+.filters input{accent-color:var(--acc);margin:0}
+.filters label.off{opacity:.42}
+.ev{font-size:12px;color:var(--gold);white-space:nowrap}
+.ghead{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px}
+.gteam{display:flex;align-items:center;gap:9px;font-weight:800;font-size:19px}
+.gteam .dot{width:13px;height:13px;border-radius:50%;flex:none}
+.mk-sec h3{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap}
 </style>
 </head>
 <body>
@@ -191,6 +215,10 @@ h2.sec{margin:22px 0 10px;font-size:13px;text-transform:uppercase;letter-spacing
     <div class="logo">N</div>
     <h1>NHL Pronos</h1>
     <div class="sp"></div>
+    <button class="btn sm" id="bReload" title="Recharger la page (équivalent F5)">
+      <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <path d="M3 12a9 9 0 1 0 2.6-6.4"/><path d="M3 3v6h6"/></svg>
+    </button>
     <button class="btn sm" id="bRefresh" title="Relancer la collecte et le moteur">
       <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
         <path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
@@ -345,6 +373,8 @@ function photo(n,src,cl){
 async function boot(){
   await lireConfig();
   S.srv=await serverAlive();
+  const hm=lireHash();
+  if(hm){ S.game=hm; S.tab="detail"; }
   try{ await chargerDonnees(); }
   catch(e){
     $("#main").innerHTML='<div class="card"><h2>Données absentes</h2>'
@@ -378,6 +408,8 @@ async function boot(){
 }
 function header(){
   const L=S.d.league;
+  const br=$("#bReload");
+  if(br) br.onclick=()=>location.reload();
   const b=$("#bRefresh");
   if(b){
     const tx=$("#bRefreshTx");
@@ -427,6 +459,8 @@ function effG(game){
   const g={...game};
   g.goalieOptions={away:goalieOptions(g,g.away),home:goalieOptions(g,g.home)};
   g.players=(game.players||[]).map(p=>({...p,buteur:{...p.buteur},passeur:{...p.passeur},pointeur:{...p.pointeur},
+    ...(p.doubleButeur?{doubleButeur:{...p.doubleButeur},tripleButeur:{...p.tripleButeur},
+      doublePointeur:{...p.doublePointeur},triplePointeur:{...p.triplePointeur}}:{}),
     flags:p.flags.slice(),raw:{...p.raw}}));
   for(const side of ["away","home"]){
     const me=g.ctx[side]={...g.ctx[side]}, opp=side==="away"?"home":"away";
@@ -443,6 +477,16 @@ function effG(game){
       p.buteur.lam=ng; p.passeur.lam=na; p.pointeur.lam=ng+na;
       p.buteur.prob=1-Math.exp(-ng); p.passeur.prob=1-Math.exp(-na);
       p.pointeur.prob=1-Math.exp(-(ng+na));
+      if(p.doubleButeur){
+        const lp=ng+na;
+        const pq=(lam,k)=>{let q=0,t=Math.exp(-lam);for(let i=0;i<k;i++){q+=t;t*=lam/(i+1);}return Math.max(0,1-q);};
+        p.doubleButeur.lam=ng; p.tripleButeur.lam=ng;
+        p.doublePointeur.lam=lp; p.triplePointeur.lam=lp;
+        p.doubleButeur.prob=Math.round(pq(ng,2)*10000)/10000;
+        p.tripleButeur.prob=Math.round(pq(ng,3)*10000)/10000;
+        p.doublePointeur.prob=Math.round(pq(lp,2)*10000)/10000;
+        p.triplePointeur.prob=Math.round(pq(lp,3)*10000)/10000;
+      }
       p.goalieF=nouveau; p.oppGoalie=gk.name;
     });
   }
@@ -469,6 +513,25 @@ function effG(game){
     const r=g.players.filter(p=>p[mk].score>0)
       .sort((a,b)=>b[mk].confidence-a[mk].confidence||b[mk].score-a[mk].score||a.name.localeCompare(b.name,"fr"));
     r.forEach((p,i)=>p[mk].rank=i+1);
+    g.players.forEach(p=>{ if(!p[mk].rank) p[mk].rank=null; });
+  }
+  const BM=(S.d&&S.d.baremes)||{doubleButeur:[[8,5],[5,4],[2.5,3],[1,2],[0,1]],
+    tripleButeur:[[3,5],[2,4],[1,3],[0.5,2],[0,1]],doublePointeur:[[35,5],[25,4],[15,3],[8,2],[0,1]],
+    triplePointeur:[[12,5],[8,4],[4,3],[2,2],[0,1]]};
+  for(const mk of ["doubleButeur","tripleButeur","doublePointeur","triplePointeur"]){
+    if(!g.players.length||!g.players[0][mk]) continue;
+    g.players.forEach(p=>{
+      p[mk].score=Math.round(100*p[mk].prob*10)/10;
+      let pal=1;
+      for(const [seuil,n] of BM[mk]){ if(p[mk].score>=seuil){pal=n;break;} }
+      if(p.recrue) pal=Math.min(2,pal);
+      p[mk].palier=pal; p[mk].etoiles=etoiles(pal);
+      if(!p.recrue&&p[mk].score>0)
+        p[mk].confidence=Math.round(confiance(p[mk].prob,p.gp,p.flags,g.preseason)*10)/10;
+    });
+    const rs=g.players.filter(p=>p[mk].score>0)
+      .sort((a,b)=>b[mk].score-a[mk].score||a.name.localeCompare(b.name,"fr"));
+    rs.forEach((p,i)=>p[mk].rank=i+1);
     g.players.forEach(p=>{ if(!p[mk].rank) p[mk].rank=null; });
   }
   return g;
@@ -609,12 +672,60 @@ async function render(){
     +"<code>api-web.nhle.com/v1</code> (calendrier, effectifs, gardiens, scores). "
     +"Aucune cote : classement 100 % statistique. Généré le "+esc(S.d.generatedUtc)+".";
 }
-const goDetail=id=>{S.game=id;S.tab="detail";nav();render();if(window.scrollTo)window.scrollTo(0,0);};
+const goDetail=id=>{S.game=id;S.tab="detail";nav();render();
+  try{history.replaceState(null,"","#/match/"+id);}catch(e){}
+  if(window.scrollTo)window.scrollTo(0,0);};
+const lireHash=()=>{const h=(typeof location!=="undefined"&&location.hash)||"";
+  const m=/^#\/match\/(\d+)$/.exec(h);return m?Number(m[1]):null;};
+
+/* ===== vague 9 : filtres, marchés à seuils, événements joueur ===== */
+const MK7=[["buteur","Buteur (1+ but)"],["passeur","Passeur (1+ passe)"],["pointeur","Pointeur (1+ point)"],
+  ["doubleButeur","Double buteur (2+ buts)"],["tripleButeur","Triple buteur (3+ buts)"],
+  ["doublePointeur","Double pointeur (2+ points)"],["triplePointeur","Triple pointeur (3+ points)"]];
+const MK_SEUIL={doubleButeur:1,tripleButeur:1,doublePointeur:1,triplePointeur:1};
+S.filt=Object.assign({buteur:1,passeur:1,pointeur:1,doubleButeur:1,tripleButeur:0,
+  doublePointeur:1,triplePointeur:0,away:1,home:1,cacherRayes:1,recruesSeules:0,top10:1},S.filt||{});
+function evTags(p){
+  const e=p.events||{};
+  return (e.anniv?' <span class="ev">🎂 anniversaire</span>':"")
+    +(e.nth?' <span class="ev">· '+e.nth+'e match NHL</span>':"");
+}
+function confBadge(mkv){
+  return '<span class="conf c'+(mkv.palier||1)+'">'+f1(mkv.confidence)+'</span>';
+}
+function chkFilt(key,label){
+  const l=el("label");
+  const i=el("input"); i.type="checkbox"; i.checked=!!S.filt[key];
+  i.onchange=()=>{S.filt[key]=i.checked?1:0;l.className=i.checked?"":"off";render();};
+  l.appendChild(i); l.appendChild(el("span",null,esc(label)));
+  l.className=S.filt[key]?"":"off";
+  return l;
+}
+function joueursFiltres(g){
+  const f=S.filt;
+  return g.players.filter(p=>(p.abbr===g.away?f.away:f.home)
+    &&(!f.cacherRayes||(p.flags||[]).indexOf("raye_compo")<0)
+    &&(!f.recruesSeules||!!p.recrue));
+}
 
 /* Analyse instantanée : la fonction /collecter fait la collecte NHL en direct
    (~4 s, ciblée sur les 2 équipes), puis le MOTEUR DU SITE (engine.py, le même
    fichier) tourne dans le navigateur via Pyodide : mêmes détails, garantie
    structurelle. Pyodide n'est chargé qu'au premier clic, puis mis en cache. */
+async function attendreCompo(g0){
+  if(S.compoWatch){ toast("Surveillance déjà en cours pour ce match."); return; }
+  S.compoWatch=setInterval(async()=>{
+    try{
+      const c=await apiFetch("collecter?game="+g0.id+"&date="+g0.date+"&check=1",null,15000).then(r=>r.json());
+      if(c&&c.publiee){
+        clearInterval(S.compoWatch); S.compoWatch=null;
+        toast("📋 Compos officielles publiées — analyse en cours…",6000);
+        analyserInstant(g0,{compo:true});
+      }
+    }catch(e){ /* sonde ratée : on réessaie au prochain tour */ }
+  },90000);
+  toast("👀 Je surveille la publication des compos (toutes les 90 s). Garde la page ouverte.",9000);
+}
 const PYODIDE_CDN="https://cdn.jsdelivr.net/pyodide/v0.26.4/full/";
 async function moteurPy(){
   if(S.py) return S.py;
@@ -633,13 +744,14 @@ async function moteurPy(){
   S.py.runPython("import json,engine");
   return S.py;
 }
-async function analyserInstant(g0){
+async function analyserInstant(g0,opts){
   if(S.analyseEnCours) return;
   S.analyseEnCours=true;
+  const compo=!!(opts&&opts.compo);
   try{
-    toast("⚡ Analyse instantanée — collecte NHL en direct pour "
+    toast((compo?"📋 Analyse officielle — ":"⚡ Analyse instantanée — ")+"collecte NHL en direct pour "
       +(g0.awayNameFr||g0.away||"")+" @ "+(g0.homeNameFr||g0.home||"")+"…",12000);
-    const raw=await apiFetch("collecter?game="+g0.id+"&date="+g0.date,null,30000).then(r=>r.json());
+    const raw=await apiFetch("collecter?game="+g0.id+"&date="+g0.date+(compo?"&compo=1":""),null,30000).then(r=>r.json());
     if(raw&&raw.erreur) throw new Error(raw.erreur);
     toast("⚙️ Démarrage du moteur d'analyse…",8000);
     const t0=Date.now();
@@ -651,7 +763,7 @@ async function analyserInstant(g0){
       +"json.dumps(_g[0] if _g else None,ensure_ascii=False)");
     const fiche=JSON.parse(out);
     if(!fiche) throw new Error("aucune analyse produite");
-    fiche.instant={generatedUtc:raw.generatedUtc,dureeS:Math.round((Date.now()-t0)/100)/10};
+    fiche.instant={generatedUtc:raw.generatedUtc,dureeS:Math.round((Date.now()-t0)/100)/10,compo:compo};
     S.complets[g0.id]=fiche;
     goDetail(g0.id);
     toast("⚡ Terminée — données en direct",5000);
@@ -780,7 +892,8 @@ function carte(g0,n){
   const g=effG(g0);
   const c=el("div","match"+(g.preseason?" pre":""));
   const h=el("div","mhead");
-  const ti=el("div","mtitle",esc(g.awayNameFr||g.away)+' <span class="mut">@</span> '+esc(g.homeNameFr||g.home));
+  const ti=el("div","mtitle",'<span class="pill tA">'+esc(g.away)+'</span> '+esc(g.awayNameFr||g.away)
+    +' <span class="mut">@</span> '+esc(g.homeNameFr||g.home)+' <span class="pill tH">'+esc(g.home)+'</span>');
   ti.onclick=()=>goDetail(g0.id);
   h.appendChild(ti);
   h.appendChild(el("div","mmeta",heureFr(g.startUtc)+(g.preseason?' <span class="pill pre">présaison</span>':"")));
@@ -806,12 +919,15 @@ function carte(g0,n){
   return c;
 }
 function ligne(p,g,mk,detail){
-  const d=el("div","pick");
+  const away=p.abbr===g.away;
+  const d=el("div","pick "+(away?"bA":"bH"));
   d.appendChild(photo(p.name,p.headshot,""));
   const b=el("div","b");
   const t=el("div","t");
   t.innerHTML='<span class="st">'+p[mk].etoiles+'</span> <span class="n">'+esc(p.name)+'</span> '
-    +'<span class="pill">'+esc(p.abbr)+'</span>'+(p.recrue?' <span class="pill n">recrue</span>':"")
+    +'<span class="pill '+(away?"tA":"tH")+'">'+esc(p.abbr)+'</span>'
+    +(p.recrue?' <span class="pill n">recrue</span>':"")
+    +confBadge(p[mk])+evTags(p)
     +'<span class="pr">'+pcent(p[mk].prob)+"</span>";
   b.appendChild(t);
   b.appendChild(el("div","kv",court(p,mk)));
@@ -872,24 +988,48 @@ async function rDetail(m){
   const c0=el("div","ctl"); c0.appendChild(sel); m.appendChild(c0);
 
   const head=el("div","card");
-  head.innerHTML='<h2>'+esc(g.awayNameFr||g.away)+' <span class="mut">@</span> '+esc(g.homeNameFr||g.home)+"</h2>"
-    +'<p class="note">'+esc(dateFr(g.date))+" · "+heureFr(g.startUtc)+(g.venue?" · "+esc(g.venue):"")
+  head.innerHTML='<div class="ghead">'
+    +'<div class="gteam"><span class="dot" style="background:var(--tmA)"></span>'
+      +esc(g.awayNameFr||g.away)+'</div>'
+    +'<div class="mut" style="font-size:18px">@</div>'
+    +'<div class="gteam"><span class="dot" style="background:var(--tmH)"></span>'
+      +esc(g.homeNameFr||g.home)+'</div>'
+    +'<div class="sp"></div><div class="mut">'+esc(dateFr(g.date))+" · "+heureFr(g.startUtc)+'</div>'
+    +'</div>'
+    +'<p class="note">'+(g.venue?esc(g.venue):"")
     +(g.preseason?' · <span class="pill pre">présaison — lecture fragile</span>':"")
-    +(g.instant?' · <span class="pill n">⚡ données en direct — analysé en '
-      +esc(String(g.instant.dureeS))+" s</span>":"")+"</p>";
-  const ra=el("button","btn pri",'Ré-analyser ce match');
-  ra.style.marginTop="10px";
-  ra.onclick=()=>{refresh();};
-  head.appendChild(ra);
-  const ri=el("button","btn","⚡ Analyse instantanée");
-  ri.style.margin="10px 0 0 8px";
+    +(g.instant?' · <span class="pill n">⚡ données en direct — '
+      +esc(String(g.instant.dureeS))+" s</span>":"")
+    +(g.compo?' · <span class="pill g">📋 compos officielles — analysées</span>':"")
+    +'</p>';
+  const bw=el("div","ctl");
+  bw.style.flexWrap="wrap";
+  const ri=el("button","btn pri","⚡ Analyse instantanée");
   ri.title="Collecte NHL en direct pour ce match seul (~5 s), mêmes détails";
   ri.onclick=()=>{analyserInstant(g0);};
-  head.appendChild(ri);
-  head.appendChild(el("div","kv2",'<span>Analyse de '+age(S.d.generatedUtc)+"</span>"
-    +"<span>Gardiens = estimation (4 derniers matchs)</span>"
-    +"<span>Les compos officielles ne sont pas publiées avant le match</span>"));
+  bw.appendChild(ri);
+  const rc=el("button","btn","📋 Dès les compos");
+  rc.title="Surveille la publication des compos officielles puis relance l'analyse tout seul";
+  rc.onclick=()=>{attendreCompo(g0);};
+  bw.appendChild(rc);
+  const ra=el("button","btn","Ré-analyser (tout régénérer)");
+  ra.onclick=()=>{refresh();};
+  bw.appendChild(ra);
+  head.appendChild(bw);
+  head.appendChild(el("div","kv2",'<span>Analyse de '+(g.instant?"l'instant":age(S.d.generatedUtc))+"</span>"
+    +"<span>"+(g.compo?"Gardiens = partants officiels":"Gardiens = estimation (4 derniers matchs)")+"</span>"
+    +"<span>Indice = confiance 0-100 · ★ = palier · couleurs = équipe</span>"));
   m.appendChild(head);
+
+  /* --- filtres : ce que je veux voir --- */
+  const fb=el("div","filters");
+  MK7.forEach(([k,lab])=>fb.appendChild(chkFilt(k,lab)));
+  fb.appendChild(chkFilt("away","🔵 "+(g.awayNameFr||g.away)));
+  fb.appendChild(chkFilt("home","🔴 "+(g.homeNameFr||g.home)));
+  fb.appendChild(chkFilt("cacherRayes","cacher les rayés"));
+  fb.appendChild(chkFilt("recruesSeules","recrues seulement"));
+  fb.appendChild(chkFilt("top10","top 10 par marché"));
+  m.appendChild(fb);
 
   /* --- contexte + gardien --- */
   const cg=el("div","ctxgrid");
@@ -919,6 +1059,8 @@ async function rDetail(m){
     };
     box.appendChild(s2);
     if(ovId) box.appendChild(el("div","kv2",'<span class="pill g">gardien confirmé par vous</span>'));
+    if(me.goalie&&me.goalie.estimated===false&&!ovId)
+      box.appendChild(el("div","kv2",'<span class="pill g">📋 partant officiel (compos NHL)</span>'));
     cg.appendChild(box);
   });
   m.appendChild(cg);
@@ -948,27 +1090,27 @@ async function rDetail(m){
   listAb();
   m.appendChild(ab);
 
-  /* --- les 3 choix --- */
+  /* --- le choix par marché (7 marchés, filtres appliqués) --- */
   m.appendChild(el("h2","sec","Le choix par marché"));
-  const gr=el("div","grid g3");
-  MKS.forEach(mk=>{
-    const box=el("div","card");
-    box.appendChild(el("div","mk",mk.toUpperCase()));
-    const list=g.players.filter(p=>p[mk].rank&&p[mk].rank<=5).sort((a,b)=>a[mk].rank-b[mk].rank);
-    if(!list.length) box.appendChild(el("p","note","Aucun joueur classé."));
-    list.forEach((p,i)=>{
-      const d=ligne(p,g,mk,i===0);
-      box.appendChild(d);
-      if(i===0){
-        const bar=el("div","bar"); const i2=el("i");
-        i2.style.width=Math.min(100,p[mk].confidence)+"%"; bar.appendChild(i2); box.appendChild(bar);
-        box.appendChild(el("div","kv2","<span>Indice "+f1(p[mk].confidence)+"/100 — palier "+p[mk].palier
-          +" ("+LABEL[p[mk].palier]+")</span>"));
-      }
+  const pf=joueursFiltres(g);
+  MK7.forEach(([mk,lab])=>{
+    if(!S.filt[mk]) return;
+    const box=el("div","card mk-sec");
+    box.innerHTML="<h3><span>"+esc(lab)+"</span><span class='sp'></span>"
+      +"<span class='more'>indice · probabilité · justification</span></h3>";
+    const list=pf.filter(p=>p[mk]&&p[mk].rank).sort((a,b)=>a[mk].rank-b[mk].rank);
+    if(!list.length){ box.appendChild(el("p","note","Aucun joueur classé avec ces filtres.")); m.appendChild(box); return; }
+    list.slice(0,S.filt.top10?10:list.length).forEach((p,i)=>{
+      box.appendChild(ligne(p,g,mk,i===0||!!MK_SEUIL[mk]));
     });
-    gr.appendChild(box);
+    const top=list[0];
+    const bar=el("div","bar"); const i2=el("i");
+    i2.style.width=Math.min(100,top[mk].confidence||top[mk].score)+"%"; bar.appendChild(i2);
+    box.appendChild(bar);
+    box.appendChild(el("div","kv2","<span>N°1 : indice "+f1(top[mk].confidence)+" — palier "
+      +top[mk].palier+" ("+LABEL[top[mk].palier]+") · "+pcent(top[mk].prob)+"</span>"));
+    m.appendChild(box);
   });
-  m.appendChild(gr);
 
   /* --- tableau complet --- */
   m.appendChild(el("h2","sec","Tous les joueurs ("+g.players.length+")"));
@@ -982,26 +1124,34 @@ async function rDetail(m){
   m.appendChild(ctl);
   const wrap=el("div","tw"); const tb=el("table"); wrap.appendChild(tb); m.appendChild(wrap);
   const COLS=[["name","Joueur"],["pos","P"],["gp","MJ"],["toi","TGL"],["sh","Tir/M"],
-    ["pts","Pt/M"],["form","5 dern."],["prob","Prob."],["conf","Indice"],["pal","Palier"]];
+    ["pts","Pt/M"],["form","5 dern."],["lg","Buts att."],["lp","Pts att."],
+    ["g2","2+ buts"],["p2","2+ pts"],["p3","3+ pts"],
+    ["prob","Prob."],["conf","Indice"],["pal","Palier"]];
   function draw(){
     const q=fi.value.trim().toLowerCase();
     const mode=fs.selectedIndex;
-    let rows=g.players.filter(p=>!q||p.name.toLowerCase().includes(q));
+    let rows=joueursFiltres(g).filter(p=>!q||p.name.toLowerCase().includes(q));
     if(mode===1) rows=rows.filter(p=>p[S.mk].rank);
     if(mode===2) rows=rows.filter(p=>!!p.recrue);
     const key=S.sort.k||"conf", dir=S.sort.d||-1;
     const val=p=>({name:p.name,pos:p.pos||"",gp:p.gp||0,toi:p.raw.toiMin||0,sh:p.perGame.sh,
-      pts:p.perGame.pts,form:p.form?p.form.pts:0,prob:p[S.mk].prob,conf:p[S.mk].confidence,
-      pal:p[S.mk].palier})[key];
+      pts:p.perGame.pts,form:p.form?p.form.pts:0,lg:p.lambda.g,lp:p.lambda.pts,
+      g2:p.doubleButeur?p.doubleButeur.prob:0,p2:p.doublePointeur?p.doublePointeur.prob:0,
+      p3:p.triplePointeur?p.triplePointeur.prob:0,
+      prob:p[S.mk].prob,conf:p[S.mk].confidence,pal:p[S.mk].palier})[key];
     rows.sort((a,b)=>{const x=val(a),y=val(b);
       if(typeof x==="string") return dir*String(x).localeCompare(String(y),"fr");
       return dir*((x||0)-(y||0));});
     tb.innerHTML="<thead><tr>"+COLS.map(([k,l])=>"<th>"+esc(l)+"</th>").join("")+"</tr></thead><tbody>"
-      +rows.map(p=>"<tr><td>"+esc(p.name)+" <span class='pill'>"+esc(p.abbr)+"</span>"
-        +(p.recrue?" <span class='pill n'>recrue</span>":"")+"</td><td>"+esc(p.pos||"—")+"</td>"
+      +rows.map(p=>"<tr><td>"+esc(p.name)+" <span class='pill "+(p.abbr===g.away?"tA":"tH")+"'>"+esc(p.abbr)+"</span>"
+        +(p.recrue?" <span class='pill n'>recrue</span>":"")+evTags(p)+"</td><td>"+esc(p.pos||"—")+"</td>"
         +"<td class='n'>"+(p.gp||0)+"</td><td class='n'>"+f1(p.raw.toiMin)+"</td>"
         +"<td class='n'>"+f1(p.perGame.sh)+"</td><td class='n'>"+f2(p.perGame.pts)+"</td>"
         +"<td class='n'>"+f2(p.form?p.form.pts:null)+"</td>"
+        +"<td class='n'>"+f2(p.lambda.g)+"</td><td class='n'>"+f2(p.lambda.pts)+"</td>"
+        +"<td class='n'>"+(p.doubleButeur?pcent(p.doubleButeur.prob):"—")+"</td>"
+        +"<td class='n'>"+(p.doublePointeur?pcent(p.doublePointeur.prob):"—")+"</td>"
+        +"<td class='n'>"+(p.triplePointeur?pcent(p.triplePointeur.prob):"—")+"</td>"
         +"<td class='n'>"+pcent(p[S.mk].prob)+"</td><td class='n'>"+f1(p[S.mk].confidence)+"</td>"
         +"<td class='st'>"+p[S.mk].etoiles+"</td></tr>").join("")+"</tbody>";
       }

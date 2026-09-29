@@ -137,6 +137,31 @@ exports.handler = async (event) => {
     if (!game) return j(404, { erreur: "match introuvable à cette date" });
     const teamArr = [game.away, game.home];
 
+    // ---- compos officielles : le boxscore NHL les publie ~1 h avant le match ----
+    // check=1 : sonde légère pour le suivi « dès que les compos sortent » ;
+    // compo=1 : collecte complète + overrides (rayés absents, gardien officiel).
+    let compo = null;
+    if (qs.compo === "1" || qs.check === "1") {
+      const bx = await get(`${WEB}/gamecenter/${gid}/boxscore`);
+      const pbg = (bx && bx.playerByGameStats) || {};
+      const equipes = {};
+      let publiee = true;
+      for (const [side, abbr] of [["awayTeam", game.away], ["homeTeam", game.home]]) {
+        const t = pbg[side] || {};
+        const ids = [...(t.forwards || []), ...(t.defense || [])].map((x) => x.playerId);
+        const st = (t.goalies || []).filter((x) => x.starter)[0] || null;
+        equipes[abbr] = {
+          joueurs: ids,
+          partant: st ? { playerId: st.playerId, name: (st.name || {}).default } : null,
+        };
+        if (!ids.length) publiee = false;
+      }
+      if (qs.check === "1") {
+        return j(200, { publiee, etat: (bx && bx.gameState) || null });
+      }
+      if (publiee) compo = { publiee: true, equipes };
+    }
+
     // saisons récentes seulement (4) : les repères du moteur n'utilisent que ça
     const y0 = +seasonId(new Date().toISOString().slice(0, 10)).slice(0, 4);
     const seasons = [y0 - 3, y0 - 2, y0 - 1, y0].map((v) => `${v}${v + 1}`);
@@ -228,6 +253,23 @@ exports.handler = async (event) => {
     const rookies = {};
     for (const [pid, d] of rookiesArr) if (d) rookies[pid] = d;
 
+    // compos officielles → rayés absents + gardien partant officiel
+    const overrides = {};
+    if (compo) {
+      const absents = [];
+      const goaliesOv = {};
+      for (const [side, t] of [["away", teamArr[0]], ["home", teamArr[1]]]) {
+        const r = rosters[t] || {};
+        const all = [...(r.forwards || []), ...(r.defensemen || [])].map((p) => p.id);
+        const actifs = new Set(compo.equipes[t].joueurs);
+        absents.push(...all.filter((id) => !actifs.has(id)));
+        const gk = compo.equipes[t].partant;
+        if (gk) goaliesOv[side] = gk.playerId;
+      }
+      overrides[String(gid)] = { absents, goalies: goaliesOv };
+      game.compo = compo;
+    }
+
     const payload = {
       generatedUtc: new Date().toISOString().replace(/\.\d+Z$/, "Z"),
       refSeason: ref,
@@ -235,7 +277,7 @@ exports.handler = async (event) => {
       games: [game], teams: teamArr, teamIndex: ti, rosters,
       skaters: skatersBy, goalies: goaliesBy, teamStats: teamsBy,
       gameLogs: glogs, recentStarters: starters, bios: biosOut, rookies,
-      overrides: {},
+      overrides,
     };
     return j(200, payload);
   } catch (e) {
