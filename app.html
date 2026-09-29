@@ -979,11 +979,13 @@ async function rSelect(m){
   m.appendChild(el("div","day",dateFr(S.date)));
   const bar=el("div","filters");
   MK7.forEach(([k,lab])=>bar.appendChild(chkSel(k,lab)));
+  bar.appendChild(chkSel("doubleChance","Double chance buteur (1 des 2)"));
+  bar.appendChild(chkSel("tripleChance","Triple chance buteur (1 des 3)"));
   m.appendChild(bar);
   const mks=MK7.filter(([k])=>S.sel[k]);
   const games=dayPicker(m);
   if(!games.length){ m.appendChild(el("div","card",'<p class="note">Aucun match ce jour-là.</p>')); return; }
-  if(!mks.length){ m.appendChild(el("div","card",'<p class="note">Coche au moins un marché ci-dessus.</p>')); return; }
+  if(!mks.length&&!S.sel.doubleChance&&!S.sel.tripleChance){ m.appendChild(el("div","card",'<p class="note">Coche au moins un marché ci-dessus.</p>')); return; }
   games.forEach(g=>{
     const c=el("div","card"+(g.preseason?" fallback":""));
     c.innerHTML='<div class="ghead">'
@@ -1014,6 +1016,27 @@ async function rSelect(m){
           row.onclick=()=>goDetail(g.id);
           c.appendChild(row);
         });
+      });
+    });
+    [["doubleChance","double","🎲 Double chance buteur — le pari passe si l'un des 2 marque"],
+     ["tripleChance","triple","🎲 Triple chance buteur — le pari passe si l'un des 3 marque"]].forEach(([key,nk,lab])=>{
+      if(!S.sel[key]) return;
+      c.appendChild(el("div","mk",lab));
+      [["away",g.away],["home",g.home]].forEach(([side,ab])=>{
+        const cb=g.combos&&g.combos[side]&&g.combos[side][nk];
+        if(!cb||!cb.members) return;
+        c.appendChild(el("div","kv2",'<span class="pill '+(side==="away"?"tA":"tH")+'">'
+          +esc(ab)+" — top "+cb.members.length+" buteurs</span>"));
+        const row=el("div","pick "+(side==="away"?"bA":"bH"));
+        row.style.padding="6px 8px";
+        row.innerHTML='<div class="b"><div class="t">'
+          +'<span class="st">'+esc(cb.etoiles)+'</span> '
+          +'<span class="n">'+cb.members.map(x=>esc(x.name)).join(" <span class=mut>ou</span> ")+'</span> '
+          +confBadge(cb)
+          +'<span class="pr">'+pcent(cb.prob)+'</span></div>'
+          +'<div class="why">'+cb.members.map(x=>esc(x.name)+" "+pcent(x.prob)).join(" · ")+'</div></div>';
+        row.onclick=()=>goDetail(g.id);
+        c.appendChild(row);
       });
     });
     const b=el("button","btn sm gh","Fiche complète du match");

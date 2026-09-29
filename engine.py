@@ -99,7 +99,12 @@ SEUILS_MK = {"doubleButeur": (2, "g"), "tripleButeur": (3, "g"),
 BAREMES = {"doubleButeur": [(8, 5), (5, 4), (2.5, 3), (1, 2), (0, 1)],
            "tripleButeur": [(3, 5), (2, 4), (1, 3), (0.5, 2), (0, 1)],
            "doublePointeur": [(35, 5), (25, 4), (15, 3), (8, 2), (0, 1)],
-           "triplePointeur": [(12, 5), (8, 4), (4, 3), (2, 2), (0, 1)]}
+           "triplePointeur": [(12, 5), (8, 4), (4, 3), (2, 2), (0, 1)],
+           # chance combinée : le score est la probabilité combinée en % —
+           # combiner 2 ou 3 buteurs donne des probabilités bien plus hautes
+           # qu'un marché simple, d'où des seuils relevés.
+           "doubleChance": [(65, 5), (55, 4), (45, 3), (35, 2), (0, 1)],
+           "tripleChance": [(75, 5), (65, 4), (55, 3), (45, 2), (0, 1)]}
 
 
 def palier_bareme(score, mk):
@@ -432,13 +437,42 @@ def run(raw):
             if autre and autre["confidence"] >= retenus[0]["confidence"] - 10:
                 retenus.append(autre)
 
+        # ---------- double / triple chance buteur : top 2 ou 3 de l'équipe ----------
+        # Le pari passe si L'UN des joueurs marque. P(aucun ne marque) =
+        # produit des (1 - p) individuels → probabilité combinée exacte.
+        def _combo(side_abbr, n, mk_key):
+            sel = sorted([p for p in players
+                          if p["abbr"] == side_abbr and "absent" not in p["flags"]
+                          and p["buteur"]["rank"]],
+                         key=lambda p: p["buteur"]["rank"])[:n]
+            if len(sel) < n:
+                return None
+            p_aucun = 1.0
+            for p in sel:
+                p_aucun *= 1.0 - (p["buteur"]["prob"] or 0.0)
+            prob = round(1.0 - p_aucun, 4)
+            pc100 = prob * 100.0
+            pal = palier_bareme(pc100, mk_key)
+            conf = js_round(0.6 * sum(p["buteur"]["confidence"] or 0 for p in sel) / n
+                            + 0.4 * pc100, 1)
+            return {"prob": prob, "palier": pal, "etoiles": etoiles(pal),
+                    "confidence": conf,
+                    "members": [{"id": p["id"], "name": p["name"], "abbr": p["abbr"],
+                                 "prob": p["buteur"]["prob"],
+                                 "confidence": p["buteur"]["confidence"],
+                                 "palier": p["buteur"]["palier"]} for p in sel]}
+
+        combos = {side: {"double": _combo(g[side], 2, "doubleChance"),
+                         "triple": _combo(g[side], 3, "tripleChance")}
+                  for side in ("away", "home")}
+
         games_out.append({
             "id": g["id"], "date": g["date"], "startUtc": g["startUtc"],
             "gameType": g["gameType"], "preseason": preseason,
             "away": g["away"], "home": g["home"],
             "awayNameFr": ctx["away"]["nameFr"], "homeNameFr": ctx["home"]["nameFr"],
             "venue": g.get("venue"), "ctx": ctx, "players": players,
-            "compo": g.get("compo"), "outsiders": retenus,
+            "compo": g.get("compo"), "outsiders": retenus, "combos": combos,
         })
 
     out = {
