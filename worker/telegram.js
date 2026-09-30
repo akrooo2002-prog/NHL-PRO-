@@ -1,0 +1,493 @@
+// Bot Telegram sur Cloudflare Worker — 100 % gratuit, sans crédits Netlify.
+// Mêmes données (GitHub Pages), mêmes filtres, mêmes claviers que le site.
+// Secrets (env du Worker) : TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET,
+// TELEGRAM_OWNER_ID (identifiants autorisés, séparés par des virgules).
+const DATA = "https://akrooo2002-prog.github.io/NHL-PRO-";
+let ENV = {};
+const TOKEN = () => ENV.TELEGRAM_BOT_TOKEN || "";
+const SECRET = () => ENV.TELEGRAM_WEBHOOK_SECRET || "";
+const OWNER = () => ENV.TELEGRAM_OWNER_ID || "";
+// Liste d'accès : identifiants Telegram séparés par des virgules. Vide = ouvert.
+const autorise = (id) => {
+  const liste = OWNER().split(",").map((x) => x.trim()).filter(Boolean);
+  return !liste.length || liste.includes(String(id));
+};
+
+// Cloudflare attend de vraies Response (pas le format Netlify).
+const j = (code, obj) => new Response(JSON.stringify(obj), {
+  status: code,
+  headers: { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json; charset=utf-8" },
+});
+const LIMITE = 3800; // Telegram coupe à 4096 — marge de sécurité
+
+/* ---------- petits formats (mêmes conventions que le site) ---------- */
+const esc = (s) => String(s == null ? "" : s)
+  .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const pct = (p) => (Math.round((p || 0) * 1000) / 10).toFixed(1).replace(".", ",") + " %";
+const f1 = (n) => (Math.round((n || 0) * 10) / 10).toFixed(1).replace(".", ",");
+const na = (s) => String(s).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+function heureFr(utc) {
+  if (!utc) return "";
+  return new Date(utc).toLocaleTimeString("fr-FR", { timeZone: "Europe/Paris", hour: "2-digit", minute: "2-digit" });
+}
+
+/* ---------- marchés : mêmes clés + mêmes libellés que le site ---------- */
+const MARCHES = [
+  ["buteur", "Buteur (1+ but)", ["buteur", "1but", "1+but", "but 1+", "marqueur"]],
+  ["passeur", "Passeur (1+ passe)", ["passeur", "1passe", "passe 1+", "assist"]],
+  ["pointeur", "Pointeur (1+ point)", ["pointeur", "1point", "1+point", "point 1+"]],
+  ["doubleButeur", "Double buteur (2+ buts)", ["2buts", "2+but", "2+ but", "doublebuteur", "double buteur", "doubler"]],
+  ["tripleButeur", "Triple buteur (3+ buts)", ["3buts", "3+but", "3+ but", "triplebuteur", "triple buteur"]],
+  ["doublePointeur", "Double pointeur (2+ points)", ["2points", "2+point", "2+ point", "doublepointeur", "double pointeur"]],
+  ["triplePointeur", "Triple pointeur (3+ points)", ["3points", "3+point", "3+ point", "triplepointeur", "triple pointeur"]],
+  ["doubleChance", "Double chance buteur (1 des 2)", ["doublechance", "double chance", "dchance", "2chances", "2 chances"]],
+  ["tripleChance", "Triple chance buteur (1 des 3)", ["triplechance", "triple chance", "tchance", "3chances", "3 chances"]],
+  ["duo15", "Duo 1,5 buts (2+ à deux)", ["duo", "duo15", "duo 1.5", "duo 1,5", "duobuts"]],
+  ["trio15", "Trio 1,5 buts (2+ à trois)", ["trio", "trio15", "trio 1.5", "trio 1,5", "triobuts"]],
+  ["outsiderButeur", "Outsider buteur", ["outsider buteur", "outsiders buteur", "outsiderbuteur", "outsidersbuteur"]],
+  ["outsiderPointeur", "Outsider pointeur", ["outsider pointeur", "outsiders pointeur", "outsiderpointeur", "outsiderspointeur"]],
+  ["outsider", "Outsiders justifiés", ["outsider", "outsiders"]],
+];
+const MK_SIMPLE = ["buteur", "passeur", "pointeur", "doubleButeur", "tripleButeur", "doublePointeur", "triplePointeur"];
+
+const AIDE =
+  "🏒 <b>Bot NHL Pronos</b> — mêmes données que le site, sans cote.\n\n" +
+  "<b>Commandes</b>\n" +
+  "/start — menu mini-app (boutons)\n" +
+  "/matchs — liste des matchs du jour\n" +
+  "/podium — top 3 du jour\n" +
+  "/buteur — top 3 buteurs par équipe\n" +
+  "/passeur — top 3 passeurs par équipe\n" +
+  "/pointeur — top 3 pointeurs par équipe\n" +
+  "/outsider — outsiders justifiés du jour\n" +
+  "/doublechance — 1 des 2 buteurs marque\n" +
+  "/triplechance — 1 des 3 buteurs marque\n" +
+  "/duo — 2+ buts cumulés par les 2 meilleurs\n" +
+  "/trio — 2+ buts cumulés par les 3 meilleurs\n" +
+  "/outsiderbuteur — outsider du marché buteur\n" +
+  "/outsiderpointeur — outsider du marché pointeur\n" +
+  "/demain — analyse de demain\n" +
+  "/dates — jours analysés\n" +
+  "/aide — cette aide\n\n" +
+  "<b>Texte libre</b> — combine comme tu veux :\n" +
+  "• filtres : buteur, passeur, pointeur, 2buts, 3buts, 2points, 3points, " +
+  "double chance, triple chance, duo, trio, outsider, outsider buteur, " +
+  "outsider pointeur\n" +
+  "• matchs : une équipe (FLA, CAR…), « match 3 », ou « tout »\n" +
+  "• jour : aujourd'hui, demain, ou une date (2026-10-01)\n\n" +
+  "Exemples : « buteur pointeur FLA » · « double chance outsider tout » · " +
+  "« 2buts 3points CAR demain »";
+
+/* ---------- mini-app : boutons inline (état porté par callback_data) ----------
+   état = <codes marchés>@<index du jour dans dates()>, ex. "13@0" =
+   buteur+pointeur, premier jour. Rien à stocker côté serveur : chaque bouton
+   transporte l'état, la fonction reste sans mémoire (serverless). */
+const MK_CODE = { 1: "buteur", 2: "passeur", 3: "pointeur", 4: "doubleButeur", 5: "tripleButeur",
+                  6: "doublePointeur", 7: "triplePointeur", 8: "doubleChance", 9: "tripleChance",
+                  c: "duo15", d: "trio15", a: "outsiderButeur", b: "outsiderPointeur", 0: "outsider" };
+const MK_LIB = { 1: "Buteur 1+", 2: "Passeur 1+", 3: "Pointeur 1+", 4: "2+ buts", 5: "3+ buts",
+                 6: "2+ points", 7: "3+ points", 8: "Double chance", 9: "Triple chance",
+                 c: "Duo 1,5 buts", d: "Trio 1,5 buts", a: "Outsider buteur", b: "Outsider pointeur",
+                 0: "Outsiders (mixte)" };
+const CODES = "1234567890cdab";
+const ETAT_DEF = "13"; // buteur + pointeur, comme le site
+
+function decodeEtat(etat) {
+  const parties = String(etat || "").split("@");
+  const codes = [...(parties[0] || "")].filter((c) => CODES.includes(c));
+  const jourIdx = Math.max(0, parseInt(parties[1] || "0", 10) || 0);
+  return { codes: codes.length ? codes : [...ETAT_DEF], jourIdx };
+}
+const btn = (texte, data) => ({ text: texte, callback_data: data });
+function accueilTexte(d, etat) {
+  const ds = dates(d), st = decodeEtat(etat);
+  const date = ds[Math.min(st.jourIdx, ds.length - 1)];
+  return "🏒 <b>NHL Pronos</b> — " + esc(date) + "\n"
+    + "Filtres actifs : " + st.codes.map((c) => MK_LIB[c]).join(", ") + "\n\n"
+    + "Clique sur ⚙️ pour cocher tes marchés, 🗓 pour choisir un match.\n"
+    + "Tu peux aussi m'écrire : « buteur outsider FLA ».";
+}
+function kbMenu(etat, d) {
+  const ds = dates(d), st = decodeEtat(etat);
+  const date = ds[Math.min(st.jourIdx, ds.length - 1)] || "";
+  return { inline_keyboard: [
+    [btn("⚙️ Filtres", "F:" + etat), btn("🗓 Matchs", "G:" + etat)],
+    [btn("🏆 Podium", "P:" + etat), btn("📅 " + date.slice(5).replace("-", "/"), "K:" + etat)],
+    [btn("❓ Aide", "A")],
+  ] };
+}
+function kbFiltres(etat) {
+  const { codes } = decodeEtat(etat);
+  const rows = [];
+  for (let i = 0; i < CODES.length; i += 2) {
+    rows.push(CODES.slice(i, i + 2).split("").map((c) =>
+      btn((codes.includes(c) ? "✅ " : "◻️ ") + MK_LIB[c], "T:" + etat + ":" + c)));
+  }
+  rows.push([btn("🚀 Tous les matchs du jour", "L:" + etat)]);
+  rows.push([btn("🗓 Choisir un match", "G:" + etat), btn("↩️ Menu", "M:" + etat)]);
+  return { inline_keyboard: rows };
+}
+function kbMatchs(etat, jeux) {
+  const rows = jeux.map((g, i) => [btn((i + 1) + ". " + g.away + " @ " + g.home
+    + " · " + heureFr(g.startUtc), "S:" + etat + ":" + (i + 1))]);
+  rows.push([btn("🎯 Tous les matchs", "S:" + etat + ":0"), btn("↩️ Menu", "M:" + etat)]);
+  return { inline_keyboard: rows };
+}
+function kbJours(etat, d) {
+  const ds = dates(d), t = aujourdhui();
+  const rows = ds.slice(0, 14).map((dt, i) => [btn(dt.slice(5).replace("-", "/")
+    + (dt === t ? "  (aujourd'hui)" : ""), "D:" + String(etat).split("@")[0] + "@" + i)]);
+  rows.push([btn("↩️ Menu", "M:" + etat)]);
+  return { inline_keyboard: rows };
+}
+
+/* ---------- chargement des données (index du site) ---------- */
+async function index() {
+  const r = await fetch(DATA + "/data/index.json");
+  if (!r.ok) throw new Error("index.json HTTP " + r.status);
+  return await r.json();
+}
+// Les joueurs classés ne sont QUE dans les fichiers jour — l'index ne porte que
+// les matchs (combos, outsiders, horaires). On charge le jour demandé à la volée.
+async function jour(date) {
+  const r = await fetch(DATA + "/data/jour-" + date + ".json");
+  if (!r.ok) throw new Error("jour-" + date + ".json HTTP " + r.status);
+  return await r.json();
+}
+// Le fichier jour ne porte QUE {id, effectif, players} : les métadonnées
+// (équipes, horaires, combos, outsiders) sont dans l'index. On fusionne par id,
+// exactement comme le fait le site après jourDe().
+async function jourComplet(date) {
+  const d = await index();
+  const jd = await jour(date);
+  const parId = {};
+  jd.games.forEach((x) => { parId[x.id] = x; });
+  return jeuxDuJour(d, date).map((g) => Object.assign({}, g, { players: (parId[g.id] || {}).players || [] }));
+}
+
+/* ---------- choix du jour ---------- */
+function dates(d) { return [...new Set(d.games.map((g) => g.date))].sort(); }
+function aujourdhui() {
+  return new Date().toLocaleDateString("sv-SE", { timeZone: "Europe/Paris" });
+}
+function jourDefaut(d) {
+  const ds = dates(d), t = aujourdhui();
+  return ds.find((x) => x >= t) || ds[ds.length - 1];
+}
+
+/* ---------- analyse de la demande ---------- */
+function parseRequete(text, d) {
+  let t = na(text);
+  const q = { marches: [], equipes: [], nums: [], date: null, tout: false, podium: false, liste: false, aide: false };
+  const mot0 = (t.match(/^\/?([a-z]+)/) || [])[1];
+  if (mot0 === "start" || mot0 === "aide" || mot0 === "help") { q.aide = true; return q; }
+  if (mot0 === "matchs" || (mot0 === "match" && !/\d/.test(t))) { q.liste = true; return q; }
+  if (mot0 === "dates") { q.date = "*"; return q; }
+
+  // date explicite
+  const md = t.match(/(20\d{2})-(\d{2})-(\d{2})/);
+  if (md) q.date = md[0];
+  // marchés (on retire les alias trouvés pour ne pas confondre avec les équipes)
+  let reste = t;
+  // alias triés du plus long au plus court : « outsider buteur » doit être
+  // reconnu avant « buteur » tout seul.
+  const aliasPlat = [];
+  MARCHES.forEach(([k, , alias]) => alias.forEach((a) => aliasPlat.push([a, k])));
+  aliasPlat.sort((x, y) => y[0].length - x[0].length);
+  for (const [a, k] of aliasPlat) {
+    const re = new RegExp("(^|[^a-z])" + a.replace(/[+.]/g, "\\$&").replace(/,/g, "[,.]") + "([^a-z]|$)");
+    if (re.test(reste)) { reste = reste.replace(re, " "); if (!q.marches.includes(k)) q.marches.push(k); }
+  }
+  if (/\bpodium\b/.test(reste)) { q.podium = true; }
+  if (/\b(marches|marche|filtres?)\b/.test(reste)) { q.aide = true; } // liste des filtres dispo
+  if (/\b(tous?|all|tout|journee)\b/.test(reste)) { q.tout = true; reste = reste.replace(/\b(tous?|all|tout|journee)\b/g, " "); }
+  // équipes (abréviations NHL) et numéros de match
+  const abbrs = new Set(); d.games.forEach((g) => { abbrs.add(g.away); abbrs.add(g.home); });
+  for (const tok of reste.match(/[a-z0-9]{2,4}/g) || []) {
+    if (abbrs.has(tok.toUpperCase()) && !q.equipes.includes(tok.toUpperCase())) q.equipes.push(tok.toUpperCase());
+  }
+  reste = reste.replace(new RegExp("(" + [...abbrs].join("|").toLowerCase() + ")", "g"), " ");
+  const mn = reste.match(/(?:match|numero|n°|n o|#)\s*(\d{1,2})/g) || [];
+  mn.forEach((x) => { const n = parseInt(x.replace(/\D/g, ""), 10); if (n >= 1 && n <= 99) q.nums.push(n); });
+  if (!mn.length) {
+    const seul = reste.match(/(?:^|\s)#?(\d{1,2})(?:\s|$)/);
+    if (seul) q.nums.push(parseInt(seul[1], 10));
+  }
+  // « demain » / « après-demain »
+  const ds = dates(d);
+  let base = q.date || jourDefaut(d);
+  if (/\bapres[- ]?demain\b/.test(t)) { const i = ds.indexOf(base); base = ds[Math.min(i + 2, ds.length - 1)]; q.date = base; }
+  else if (/\bdemain\b/.test(t)) { const i = ds.indexOf(base); base = ds[Math.min(i + 1, ds.length - 1)]; q.date = base; }
+  return q;
+}
+
+function jeuxDuJour(d, date) {
+  return d.games.filter((g) => g.date === date)
+    .sort((a, b) => String(a.startUtc).localeCompare(String(b.startUtc)));
+}
+
+/* ---------- sélection des matchs demandés (dans le jour fusionné) ---------- */
+function selection(jeux, q) {
+  if (q.nums.length) jeux = jeux.filter((g, i) => q.nums.includes(i + 1));
+  if (q.equipes.length) jeux = jeux.filter((g) => q.equipes.includes(g.away) || q.equipes.includes(g.home));
+  return jeux;
+}
+
+/* ---------- mise en forme ---------- */
+function ligneJoueur(p, mk, i) {
+  return " " + (i + 1) + ". " + esc(p.name) + " " + (p[mk].etoiles || "") + " " + pct(p[mk].prob);
+}
+function blocMatch(g, marches) {
+  const L = [];
+  L.push("🏒 <b>" + esc(g.awayNameFr || g.away) + " @ " + esc(g.homeNameFr || g.home) + "</b> · " + heureFr(g.startUtc)
+    + (g.preseason ? " · ⚠️ présaison (probabilités fragiles)" : ""));
+  for (const mk of marches) {
+    if (mk === "outsider") {
+      if ((g.outsiders || []).length) {
+        L.push("<b>OUTSIDERS</b> 🎯");
+        g.outsiders.forEach((o) => L.push(" • " + esc(o.name) + " (" + esc(o.abbr) + ") — " + esc(o.mk)
+          + " n°" + o.rank + " · " + pct(o.prob) + " " + (o.etoiles || "")
+          + "\n   " + esc(o.why)));
+      }
+      continue;
+    }
+    if (mk === "duo15" || mk === "trio15") {
+      const lab = MARCHES.find((m) => m[0] === mk)[1].toUpperCase();
+      const lignes = [];
+      [["away", "🔵"], ["home", "🔴"]].forEach(([side, ic]) => {
+        const cb = g.combos && g.combos[side] && g.combos[side][mk];
+        if (!cb) return;
+        lignes.push(" " + ic + " " + esc(cb.members.map((x) => x.name).join(" + "))
+          + "\n   → " + pct(cb.prob) + " " + (cb.etoiles || "") + " (indice " + f1(cb.confidence) + ")");
+      });
+      if (lignes.length) { L.push("<b>" + lab + "</b> ⚔️"); L.push(...lignes); }
+      continue;
+    }
+    if (mk === "outsiderButeur" || mk === "outsiderPointeur") {
+      const liste = g[mk === "outsiderButeur" ? "outsidersButeur" : "outsidersPointeur"] || [];
+      if (!liste.length) continue;                // personne d'éligible → pas de bloc
+      L.push("<b>" + MARCHES.find((m) => m[0] === mk)[1].toUpperCase() + "</b> 🎯");
+      liste.forEach((o) => L.push(" • " + esc(o.name) + " (" + esc(o.abbr) + ") — " + esc(o.mk)
+        + " n°" + o.rank + " · " + pct(o.prob) + " " + (o.etoiles || "")
+        + "\n   " + esc(o.why)));
+      continue;
+    }
+    if (mk === "doubleChance" || mk === "tripleChance") {
+      const nk = mk === "doubleChance" ? "double" : "triple";
+      const lab = MARCHES.find((m) => m[0] === mk)[1].toUpperCase();
+      const lignes = [];
+      [["away", "🔵"], ["home", "🔴"]].forEach(([side, ic]) => {
+        const cb = g.combos && g.combos[side] && g.combos[side][nk];
+        if (!cb) return;
+        lignes.push(" " + ic + " " + esc(cb.members.map((x) => x.name).join(" ou "))
+          + "\n   → " + pct(cb.prob) + " " + (cb.etoiles || "") + " (indice " + f1(cb.confidence) + ")");
+      });
+      if (lignes.length) { L.push("<b>" + lab + "</b> 🎲"); L.push(...lignes); }
+      continue;
+    }
+    // marché simple : top 3 par équipe
+    const lab = MARCHES.find((m) => m[0] === mk)[1].toUpperCase();
+    const blocs = [];
+    [["away", g.away, "🔵"], ["home", g.home, "🔴"]].forEach(([, ab, ic]) => {
+      const top = (g.players || []).filter((p) => p.abbr === ab && p[mk] && p[mk].rank)
+        .sort((a, b) => a[mk].rank - b[mk].rank).slice(0, 3);
+      if (top.length) blocs.push(" " + ic + " " + esc(ab) + "\n" + top.map((p, i) => ligneJoueur(p, mk, i)).join("\n"));
+    });
+    if (blocs.length) { L.push("<b>" + lab + "</b> 🎯"); L.push(...blocs); }
+  }
+  return L.join("\n");
+}
+function blocPodium(date, jeux) {
+  const L = ["🏆 <b>PODIUM du " + esc(date) + "</b>"];
+  ["buteur", "passeur", "pointeur"].forEach((mk) => {
+    const rows = [];
+    jeux.forEach((g) => (g.players || []).forEach((p) => { if (p[mk] && p[mk].score > 0) rows.push({ p, g }); }));
+    rows.sort((a, b) => b.p[mk].confidence - a.p[mk].confidence || b.p[mk].score - a.p[mk].score
+      || a.p.name.localeCompare(b.p.name, "fr"));
+    const vus = new Set(), top = [];
+    rows.forEach((r) => { if (vus.has(r.p.id)) return; vus.add(r.p.id); top.push(r); });
+    L.push("<b>" + mk.toUpperCase() + "</b> 🎯");
+    const med = ["🥇", "🥈", "🥉"];
+    top.slice(0, 3).forEach((r, i) => L.push(" " + med[i] + " " + esc(r.p.name) + " (" + esc(r.p.abbr) + " vs "
+      + esc(r.p.opp) + ") " + pct(r.p[mk].prob) + " " + (r.p[mk].etoiles || "")));
+  });
+  return L.join("\n");
+}
+function blocListe(date, jeux) {
+  if (!jeux.length) return "Aucun match le " + esc(date) + ". /dates pour voir les jours disponibles.";
+  return "🗓 <b>Matchs du " + esc(date) + "</b>\n" + jeux.map((g, i) => (i + 1) + ". "
+    + esc(g.away) + " @ " + esc(g.home) + " · " + heureFr(g.startUtc)
+    + (g.preseason ? " (préseason)" : "")).join("\n")
+    + "\n\nEx : « buteur match 1 », « outsider FLA », « tout pointeur »";
+}
+
+/* ---------- réponse complète ---------- */
+async function traite(text) {
+  const d = await index();
+  const q = parseRequete(text, d);
+  const ds = dates(d);
+  if (q.aide) return [AIDE];
+  if (q.date === "*") return ["🗓 <b>Jours analysés</b>\n" + ds.join("\n") + "\n(mise à jour : " + esc(d.generatedUtc) + ")"];
+  const date = q.date || jourDefaut(d);
+  if (!ds.includes(date)) return ["Pas d'analyse pour le " + esc(date) + ". Prochains jours : " + ds.slice(0, 8).join(", ")];
+  const jeuxJour = await jourComplet(date); // index + joueurs classés fusionnés
+  const jeux = selection(jeuxJour, q);
+  if (q.liste && !q.marches.length) return [blocListe(date, jeuxJour)];
+  if (q.podium) return [blocPodium(date, jeuxJour)];
+  if (!jeux.length) return ["Aucun match ne correspond le " + esc(date) + ". /matchs pour la liste."];
+  let marches = q.marches.filter((m) => m !== "*");
+  if (!marches.length) marches = ["buteur", "pointeur"]; // défaut = celui du site
+  return morceauxResultats(date, jeux, ordonneMk(marches));
+}
+const ORDRE_MK = [...MK_SIMPLE, "doubleChance", "tripleChance", "duo15", "trio15",
+                  "outsiderButeur", "outsiderPointeur", "outsider"];
+const ordonneMk = (m) => m.slice().sort((a, b) => ORDRE_MK.indexOf(a) - ORDRE_MK.indexOf(b));
+function morceauxResultats(date, jeux, marches) {
+  const entete = "📅 <b>" + esc(date) + "</b> · " + jeux.length + " match" + (jeux.length > 1 ? "s" : "");
+  const morceaux = [];
+  let buf = entete;
+  for (const g of jeux) {
+    const bloc = blocMatch(g, marches);
+    if ((buf + "\n\n" + bloc).length > LIMITE && buf !== entete) { morceaux.push(buf); buf = bloc; }
+    else buf += "\n\n" + bloc;
+  }
+  morceaux.push(buf);
+  return morceaux;
+}
+
+/* ---------- navigation par boutons ---------- */
+async function traiteCallback(data, d) {
+  const ds = dates(d);
+  const [cmd, etat, extra] = String(data).split(":");
+  const { codes, jourIdx } = decodeEtat(etat);
+  const date = ds[Math.min(jourIdx, ds.length - 1)] || ds[ds.length - 1];
+  const titreF = "⚙️ <b>Filtres</b> — 📅 " + esc(date) + "\nCoche tes marchés puis lance :";
+  if (cmd === "A") return { envoie: [AIDE], clavier: kbMenu(etat, d) };
+  if (cmd === "M") return { edit: { texte: accueilTexte(d, etat), clavier: kbMenu(etat, d) } };
+  if (cmd === "F") return { edit: { texte: titreF, clavier: kbFiltres(etat) } };
+  if (cmd === "T") {
+    let c2 = codes.includes(extra) ? codes.filter((x) => x !== extra) : [...codes, extra];
+    if (!c2.length) c2 = codes;                       // on garde toujours au moins un filtre
+    c2.sort((a, b) => CODES.indexOf(a) - CODES.indexOf(b));
+    const e2 = c2.join("") + "@" + jourIdx;
+    return { edit: { texte: titreF, clavier: kbFiltres(e2) } };
+  }
+  if (cmd === "L" || cmd === "S") {
+    const jeuxJour = await jourComplet(date);
+    let jeux = jeuxJour;
+    if (cmd === "S") {
+      const n = parseInt(extra, 10);
+      jeux = n >= 1 ? jeuxJour.filter((g, i) => i + 1 === n) : jeuxJour;
+    }
+    if (!jeux.length) return { envoie: ["Aucun match ne correspond."], clavier: kbMenu(etat, d) };
+    const marches = ordonneMk(codes.map((c) => MK_CODE[c]));
+    return { envoie: morceauxResultats(date, jeux, marches), clavier: kbMenu(etat, d) };
+  }
+  if (cmd === "G") {
+    const jeux = await jourComplet(date);
+    return { edit: { texte: "🗓 <b>Matchs du " + esc(date) + "</b> — choisis :", clavier: kbMatchs(etat, jeux) } };
+  }
+  if (cmd === "P") return { envoie: [blocPodium(date, await jourComplet(date))], clavier: kbMenu(etat, d) };
+  if (cmd === "K") return { edit: { texte: "📅 <b>Choisis un jour</b> :", clavier: kbJours(etat, d) } };
+  if (cmd === "D") return { edit: { texte: accueilTexte(d, etat), clavier: kbMenu(etat, d) } };
+  return {};
+}
+
+/* ---------- API Telegram ---------- */
+async function tg(methode, obj) {
+  const r = await fetch("https://api.telegram.org/bot" + TOKEN() + "/" + methode, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(obj),
+  });
+  const res = await r.json().catch(() => ({}));
+  if (!r.ok || res.ok === false) {
+    const msg = String(res.description || "HTTP " + r.status);
+    if (/message is not modified/i.test(msg)) return res; // navigation à l'identique : pas une erreur
+    throw new Error(methode + " : " + msg.slice(0, 200));
+  }
+  return res;
+}
+function decoupe(texte) { // filet : Telegram coupe à 4096
+  if (texte.length <= 4090) return [texte];
+  const bouts = [];
+  let b = "";
+  texte.split("\n").forEach((l) => {
+    if ((b + "\n" + l).length > 4000 && b) { bouts.push(b); b = l; } else b += (b ? "\n" : "") + l;
+  });
+  if (b) bouts.push(b);
+  return bouts;
+}
+async function envoie(chatId, morceaux, clavier) {
+  const parties = [];
+  morceaux.forEach((t) => parties.push(...decoupe(t)));
+  for (let i = 0; i < parties.length; i++) {
+    const payload = { chat_id: chatId, text: parties[i], parse_mode: "HTML", disable_web_page_preview: true };
+    if (clavier && i === parties.length - 1) payload.reply_markup = clavier;
+    await tg("sendMessage", payload);
+  }
+}
+
+/* ---------- handler Cloudflare Worker ---------- */
+export default {
+  async fetch(request, env) {
+    ENV = env || {};
+    if (request.method === "GET") return j(200, { ok: true, bot: !!TOKEN(), donnees: DATA });
+    if (request.method !== "POST") return j(405, { ok: false });
+    if (!TOKEN()) return j(200, { ok: false, erreur: "TELEGRAM_BOT_TOKEN non configuré" });
+    const sec = request.headers.get("x-telegram-bot-api-secret-token");
+    if (SECRET() && sec !== SECRET()) return j(401, { ok: false });
+    let up;
+    try { up = JSON.parse((await request.text()) || "{}"); } catch (e) { return j(200, { ok: false }); }
+
+    // ---- clic sur un bouton (mini-app) ----
+    const cbq = up.callback_query;
+    if (cbq && cbq.message) {
+      if (!autorise((cbq.from || {}).id)) {
+        try { await tg("answerCallbackQuery", { callback_query_id: cbq.id, text: "🔒 Accès privé", show_alert: true }); } catch (e) { /* tant pis */ }
+        return j(200, { ok: true, ignore: true });
+      }
+      try {
+        await tg("answerCallbackQuery", { callback_query_id: cbq.id });
+        const d = await index();
+        const res = await traiteCallback(cbq.data, d);
+        if (res.edit) {
+          await tg("editMessageText", {
+            chat_id: cbq.message.chat.id, message_id: cbq.message.message_id,
+            text: res.edit.texte, parse_mode: "HTML", disable_web_page_preview: true,
+            reply_markup: res.edit.clavier,
+          });
+        }
+        if (res.envoie) await envoie(cbq.message.chat.id, res.envoie, res.clavier);
+        return j(200, { ok: true, action: cbq.data });
+      } catch (e) {
+        try { await envoie(cbq.message.chat.id, ["❌ Erreur : " + esc(String((e && e.message) || e))]); } catch (e2) { /* tant pis */ }
+        return j(200, { ok: false, erreur: String((e && e.message) || e) });
+      }
+    }
+
+    const msg = up.message || up.edited_message;
+    if (!msg || !msg.text) return j(200, { ok: true });           // stickers, photos, canaux…
+    if (!autorise(msg.chat.id)) {                                 // accès restreint : on lui donne son ID
+      try {
+        await envoie(msg.chat.id, ["🔒 <b>Accès privé.</b>\nTon identifiant Telegram : <code>"
+          + esc(msg.chat.id) + "</code>\nEnvoie-le à Amine pour qu'il autorise ton accès."]);
+      } catch (e) { /* tant pis */ }
+      return j(200, { ok: true, ignore: true });
+    }
+    const mot0 = (na(String(msg.text)).match(/^\/?([a-z]+)/) || [])[1];
+    try {
+      if (mot0 === "start") {                                    // /start → la mini-app
+        const d = await index();
+        const ds = dates(d);
+        const etat = ETAT_DEF + "@" + Math.max(0, ds.indexOf(jourDefaut(d)));
+        await envoie(msg.chat.id, [accueilTexte(d, etat)], kbMenu(etat, d));
+        return j(200, { ok: true, menu: true });
+      }
+      const morceaux = await traite(msg.text);
+      await envoie(msg.chat.id, morceaux);
+      return j(200, { ok: true, reponses: morceaux.length });
+    } catch (e) {
+      try { await envoie(msg.chat.id, ["❌ Erreur : " + esc(String((e && e.message) || e))]); } catch (e2) { /* tant pis */ }
+      return j(200, { ok: false, erreur: String((e && e.message) || e) });
+    }
+  },
+};
