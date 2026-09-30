@@ -46,6 +46,10 @@ const MARCHES = [
   ["trio15", "Trio 1,5 buts (2+ à trois)", ["trio", "trio15", "trio 1.5", "trio 1,5", "triobuts"]],
   ["outsiderButeur", "Outsider buteur", ["outsider buteur", "outsiders buteur", "outsiderbuteur", "outsidersbuteur"]],
   ["outsiderPointeur", "Outsider pointeur", ["outsider pointeur", "outsiders pointeur", "outsiderpointeur", "outsiderspointeur"]],
+  ["outsiderDoubleButeur", "Outsider 2+ buts", ["outsider 2 buts", "outsider 2+ buts", "outsider2buts", "outsider double buteur"]],
+  ["outsiderTripleButeur", "Outsider 3+ buts", ["outsider 3 buts", "outsider 3+ buts", "outsider3buts", "outsider triple buteur"]],
+  ["outsiderDoublePointeur", "Outsider 2+ points", ["outsider 2 points", "outsider 2+ points", "outsider2points", "outsider double pointeur"]],
+  ["outsiderTriplePointeur", "Outsider 3+ points", ["outsider 3 points", "outsider 3+ points", "outsider3points", "outsider triple pointeur"]],
   ["outsider", "Outsiders justifiés", ["outsider", "outsiders"]],
 ];
 const MK_SIMPLE = ["buteur", "passeur", "pointeur", "doubleButeur", "tripleButeur", "doublePointeur", "triplePointeur"];
@@ -66,6 +70,11 @@ const AIDE =
   "/trio — 2+ buts cumulés par les 3 meilleurs\n" +
   "/outsiderbuteur — outsider du marché buteur\n" +
   "/outsiderpointeur — outsider du marché pointeur\n" +
+  "/outsider2buts — outsider 2+ buts\n" +
+  "/outsider3buts — outsider 3+ buts\n" +
+  "/outsider2points — outsider 2+ points\n" +
+  "/outsider3points — outsider 3+ points\n" +
+  "/top — 🌟 le meilleur du jour, filtre par filtre\n" +
   "/demain — analyse de demain\n" +
   "/gardien — gardiens probables + corriger un partant\n" +
   "/dates — jours analysés\n" +
@@ -85,12 +94,21 @@ const AIDE =
    transporte l'état, la fonction reste sans mémoire (serverless). */
 const MK_CODE = { 1: "buteur", 2: "passeur", 3: "pointeur", 4: "doubleButeur", 5: "tripleButeur",
                   6: "doublePointeur", 7: "triplePointeur", 8: "doubleChance", 9: "tripleChance",
-                  c: "duo15", d: "trio15", a: "outsiderButeur", b: "outsiderPointeur", 0: "outsider" };
+                  c: "duo15", d: "trio15", a: "outsiderButeur", b: "outsiderPointeur",
+                  e: "outsiderDoubleButeur", f: "outsiderTripleButeur",
+                  g: "outsiderDoublePointeur", h: "outsiderTriplePointeur", 0: "outsider" };
 const MK_LIB = { 1: "Buteur 1+", 2: "Passeur 1+", 3: "Pointeur 1+", 4: "2+ buts", 5: "3+ buts",
                  6: "2+ points", 7: "3+ points", 8: "Double chance", 9: "Triple chance",
                  c: "Duo 1,5 buts", d: "Trio 1,5 buts", a: "Outsider buteur", b: "Outsider pointeur",
+                 e: "Outsider 2+ buts", f: "Outsider 3+ buts", g: "Outsider 2+ points", h: "Outsider 3+ points",
                  0: "Outsiders (mixte)" };
-const CODES = "1234567890cdab";
+const CODES = "1234567890cdabefgh";
+const OUTS_CHAMP = { outsider: "outsiders", outsiderButeur: "outsidersButeur",
+  outsiderPointeur: "outsidersPointeur", outsiderDoubleButeur: "outsidersDoubleButeur",
+  outsiderTripleButeur: "outsidersTripleButeur", outsiderDoublePointeur: "outsidersDoublePointeur",
+  outsiderTriplePointeur: "outsidersTriplePointeur" };
+// ✅ sûr = tête du marché + indice solide · 🔥 valeur = 3 derniers matchs très au-dessus
+const vTxt = (v) => (v === "VALUE" ? " 🔥" : v === "SUR" ? " ✅" : "");
 const ETAT_DEF = "13"; // buteur + pointeur, comme le site
 
 function decodeEtat(etat) {
@@ -105,7 +123,7 @@ function accueilTexte(d, etat) {
   const date = ds[Math.min(st.jourIdx, ds.length - 1)];
   return "🏒 <b>NHL Pronos</b> — " + esc(date) + "\n"
     + "Filtres actifs : " + st.codes.map((c) => MK_LIB[c]).join(", ") + "\n\n"
-    + "Clique sur ⚙️ pour cocher tes marchés, 🗓 pour choisir un match.\n"
+    + "Clique sur ⚙️ pour cocher tes marchés, 🌟 pour le top du jour.\n"
     + "Tu peux aussi m'écrire : « buteur outsider FLA »\n"
     + "ou « gardien VAN Demko » pour adapter les analyses à un gardien.";
 }
@@ -114,8 +132,9 @@ function kbMenu(etat, d) {
   const date = ds[Math.min(st.jourIdx, ds.length - 1)] || "";
   return { inline_keyboard: [
     [btn("⚙️ Filtres", "F:" + etat), btn("🗓 Matchs", "G:" + etat)],
-    [btn("🏆 Podium", "P:" + etat), btn("🥅 Gardiens", "Y:" + etat)],
-    [btn("📅 " + date.slice(5).replace("-", "/"), "K:" + etat), btn("❓ Aide", "A")],
+    [btn("🏆 Podium", "P:" + etat), btn("🌟 Top du jour", "O:" + etat)],
+    [btn("🥅 Gardiens", "Y:" + etat), btn("📅 " + date.slice(5).replace("-", "/"), "K:" + etat)],
+    [btn("❓ Aide", "A")],
   ] };
 }
 function kbFiltres(etat) {
@@ -188,6 +207,17 @@ function poissonGeq(lam, k) {
   return Math.max(0, 1 - s2);
 }
 const etoilesDe = (n) => "★".repeat(n) + "☆".repeat(5 - n);
+// même étiquette que le moteur : ✅ SÛR (top 2 + indice ≥ 70), 🔥 VALUE (3 derniers
+// matchs très au-dessus de la saison), sinon PROBABLE.
+function valeurLab(p, conf, rank) {
+  if (conf && conf >= 70 && rank && rank <= 2) return "SUR";
+  const f3 = p.form3 || {};
+  if ((f3.n || 0) >= 3 && (p.gp || 0) >= 10 && (f3.pts || 0) >= 3) {
+    const saison = (p.perGame || {}).pts || 0;
+    if (saison <= 0 || f3.pts / 3 >= 1.5 * saison) return "VALUE";
+  }
+  return "PROBABLE";
+}
 function palierDe(c, paliers) { for (const [seuil, n] of paliers) if (c >= seuil) return n; return 1; }
 function baremeDe(score, mk, baremes) { for (const [seuil, n] of (baremes[mk] || [])) if (score >= seuil) return n; return 1; }
 // même indice que engine.py : 80 % la probabilité du marché, 20 % la fiabilité des données.
@@ -296,9 +326,17 @@ function adapteMatch(m, ov, d) {
       .sort((a, b) => b[mk].score - a[mk].score || cmpNom(a.name, b.name))
       .forEach((p, i) => { p[mk].rank = i + 1; });
   });
+  ["buteur", "passeur", "pointeur", "doubleButeur", "tripleButeur", "doublePointeur",
+   "triplePointeur"].forEach((mk) => {
+    m.players.forEach((p) => { if (p[mk]) p[mk].valeur = valeurLab(p, p[mk].confidence, p[mk].rank); });
+  });
   m.outsiders = outsidersDe(m, null);
   m.outsidersButeur = outsidersDe(m, "buteur");
   m.outsidersPointeur = outsidersDe(m, "pointeur");
+  m.outsidersDoubleButeur = outsidersDe(m, "doubleButeur");
+  m.outsidersTripleButeur = outsidersDe(m, "tripleButeur");
+  m.outsidersDoublePointeur = outsidersDe(m, "doublePointeur");
+  m.outsidersTriplePointeur = outsidersDe(m, "triplePointeur");
   m.combos = {};
   [["away", m.away], ["home", m.home]].forEach(([side, ab]) => {
     m.combos[side] = {
@@ -310,8 +348,13 @@ function adapteMatch(m, ov, d) {
   });
   return m;
 }
-// outsiders : port exact de _outsiders() d'engine.py
+// outsiders : port exact de _outsiders() d'engine.py (marchés à seuils inclus)
+const SEUILS_OUTS = ["doubleButeur", "tripleButeur", "doublePointeur", "triplePointeur"];
+const MK_FR_OUTS = { doubleButeur: "2+ buts", tripleButeur: "3+ buts", doublePointeur: "2+ points", triplePointeur: "3+ points" };
 function outsidersDe(m, mkt) {
+  const estSeuil = SEUILS_OUTS.includes(mkt);
+  let minConf = 45, needPal = 1;
+  if (estSeuil) { minConf = mkt === "tripleButeur" ? 20 : 30; needPal = 2; }
   const mks = mkt ? [mkt] : ["buteur", "pointeur"];
   const top3 = new Set();
   mks.forEach((m2) => m.players.forEach((p) => {
@@ -322,7 +365,8 @@ function outsidersDe(m, mkt) {
     if (top3.has(p.id) || (p.flags || []).includes("absent") || p.recrue) continue;
     const mk = mkt || ((p.pointeur.confidence || 0) >= (p.buteur.confidence || 0) ? "pointeur" : "buteur");
     const conf = p[mk].confidence || 0;
-    if (conf < 45 || !p[mk].rank || p[mk].rank < 4 || p[mk].rank > 12) continue;
+    if (conf < minConf || !p[mk].rank || p[mk].rank < 4 || p[mk].rank > 12) continue;
+    if (estSeuil && (p[mk].palier || 1) < needPal) continue;
     const bits = [];
     const f5 = p.form || {}, pg = p.perGame || {};
     if ((f5.n || 0) >= 3 && (f5.pts || 0) >= Math.max(0.6, (pg.pts || 0) * 1.25))
@@ -336,10 +380,17 @@ function outsidersDe(m, mkt) {
     const ms = (p.milestones || {}).pts || {};
     if (ms.gap && ms.gap <= 3 && (ms.next || 0) >= 100)
       bits.push("à " + ms.gap + " points de " + ms.next + " en carrière : il va les chercher");
+    if (estSeuil) {
+      const lh = p[mk].logHit || {};
+      const k = { doubleButeur: 2, tripleButeur: 3, doublePointeur: 2, triplePointeur: 3 }[mkt];
+      const unite = (mkt === "doubleButeur" || mkt === "tripleButeur") ? "buts" : "points";
+      if ((lh.deja || 0) >= 2 && lh.n)
+        bits.push("a déjà signé " + k + "+ " + unite + " " + lh.deja + " fois sur ses " + lh.n + " derniers matchs");
+    }
     if (!bits.length) continue;
-    out.push({ id: p.id, name: p.name, abbr: p.abbr, mk, rank: p[mk].rank, prob: p[mk].prob,
-      confidence: conf, palier: p[mk].palier, etoiles: p[mk].etoiles,
-      why: bits.slice(0, 2).join(" ; ") + "." });
+    out.push({ id: p.id, name: p.name, abbr: p.abbr, mk: MK_FR_OUTS[mk] || mk, rank: p[mk].rank,
+      prob: p[mk].prob, confidence: conf, palier: p[mk].palier, etoiles: p[mk].etoiles,
+      valeur: p[mk].valeur || "PROBABLE", why: bits.slice(0, 2).join(" ; ") + "." });
   }
   out.sort((a, b) => b.confidence - a.confidence);
   const retenus = [];
@@ -369,7 +420,8 @@ function comboDe(m, sideAbbr, n, mkKey, k, baremes) {
   const pc100 = prob * 100;
   const pal = baremeDe(pc100, mkKey, baremes);
   const conf = jsRound(0.6 * sel.reduce((som, p) => som + (p.buteur.confidence || 0), 0) / n + 0.4 * pc100, 1);
-  return { prob, palier: pal, etoiles: etoilesDe(pal), confidence: conf,
+  const val = sel.some((p) => p.buteur.valeur === "VALUE") ? "VALUE" : (conf >= 65 ? "SUR" : "PROBABLE");
+  return { prob, palier: pal, etoiles: etoilesDe(pal), confidence: conf, valeur: val,
     members: sel.map((p) => ({ id: p.id, name: p.name, abbr: p.abbr, prob: p.buteur.prob,
       confidence: p.buteur.confidence, palier: p.buteur.palier })) };
 }
@@ -471,7 +523,7 @@ function jourDefaut(d) {
 /* ---------- analyse de la demande ---------- */
 function parseRequete(text, d) {
   let t = na(text);
-  const q = { marches: [], equipes: [], nums: [], date: null, tout: false, podium: false, liste: false, aide: false };
+  const q = { marches: [], equipes: [], nums: [], date: null, tout: false, podium: false, liste: false, aide: false, top: false };
   const mot0 = (t.match(/^\/?([a-z]+)/) || [])[1];
   if (mot0 === "start" || mot0 === "aide" || mot0 === "help") { q.aide = true; return q; }
   if (mot0 === "matchs" || (mot0 === "match" && !/\d/.test(t))) { q.liste = true; return q; }
@@ -492,6 +544,7 @@ function parseRequete(text, d) {
     if (re.test(reste)) { reste = reste.replace(re, " "); if (!q.marches.includes(k)) q.marches.push(k); }
   }
   if (/\bpodium\b/.test(reste)) { q.podium = true; }
+  if (/\btop\b/.test(reste)) { q.top = true; reste = reste.replace(/\btop\b/g, " "); }
   if (/\b(marches|marche|filtres?)\b/.test(reste)) { q.aide = true; } // liste des filtres dispo
   if (/\b(tous?|all|tout|journee)\b/.test(reste)) { q.tout = true; reste = reste.replace(/\b(tous?|all|tout|journee)\b/g, " "); }
   // équipes (abréviations NHL) et numéros de match
@@ -528,7 +581,8 @@ function selection(jeux, q) {
 
 /* ---------- mise en forme ---------- */
 function ligneJoueur(p, mk, i) {
-  return " " + (i + 1) + ". " + esc(p.name) + " " + (p[mk].etoiles || "") + " " + pct(p[mk].prob);
+  return " " + (i + 1) + ". " + esc(p.name) + " " + (p[mk].etoiles || "") + " " + pct(p[mk].prob)
+    + vTxt(p[mk].valeur);
 }
 function blocMatch(g, marches) {
   const L = [];
@@ -562,12 +616,12 @@ function blocMatch(g, marches) {
       if (lignes.length) { L.push("<b>" + lab + "</b> ⚔️"); L.push(...lignes); }
       continue;
     }
-    if (mk === "outsiderButeur" || mk === "outsiderPointeur") {
-      const liste = g[mk === "outsiderButeur" ? "outsidersButeur" : "outsidersPointeur"] || [];
+    if (OUTS_CHAMP[mk] && mk !== "outsider") {
+      const liste = g[OUTS_CHAMP[mk]] || [];
       if (!liste.length) continue;                // personne d'éligible → pas de bloc
       L.push("<b>" + MARCHES.find((m) => m[0] === mk)[1].toUpperCase() + "</b> 🎯");
       liste.forEach((o) => L.push(" • " + esc(o.name) + " (" + esc(o.abbr) + ") — " + esc(o.mk)
-        + " n°" + o.rank + " · " + pct(o.prob) + " " + (o.etoiles || "")
+        + " n°" + o.rank + " · " + pct(o.prob) + " " + (o.etoiles || "") + vTxt(o.valeur)
         + "\n   " + esc(o.why)));
       continue;
     }
@@ -608,7 +662,7 @@ function blocPodium(date, jeux) {
     L.push("<b>" + mk.toUpperCase() + "</b> 🎯");
     const med = ["🥇", "🥈", "🥉"];
     top.slice(0, 3).forEach((r, i) => L.push(" " + med[i] + " " + esc(r.p.name) + " (" + esc(r.p.abbr) + " vs "
-      + esc(r.p.opp) + ") " + pct(r.p[mk].prob) + " " + (r.p[mk].etoiles || "")));
+      + esc(r.p.opp) + ") " + pct(r.p[mk].prob) + " " + (r.p[mk].etoiles || "") + vTxt(r.p[mk].valeur)));
   });
   return L.join("\n");
 }
@@ -634,6 +688,11 @@ async function traite(text) {
   const jeuxJour = await jourAdapte(date, d); // index + joueurs + gardiens corrigés
   const jeux = selection(jeuxJour, q);
   if (q.liste && !q.marches.length) return [blocListe(date, jeuxJour)];
+  if (q.top) {
+    let mks = q.marches.filter((m) => m !== "*" && m !== "top");
+    if (!mks.length) mks = ["buteur", "pointeur"];   // défaut du /top
+    return [blocTop(date, jeuxJour, ordonneMk(mks))];
+  }
   if (q.podium) return [blocPodium(date, jeuxJour)];
   if (!jeux.length) return ["Aucun match ne correspond le " + esc(date) + ". /matchs pour la liste."];
   let marches = q.marches.filter((m) => m !== "*");
@@ -641,7 +700,9 @@ async function traite(text) {
   return morceauxResultats(date, jeux, ordonneMk(marches));
 }
 const ORDRE_MK = [...MK_SIMPLE, "doubleChance", "tripleChance", "duo15", "trio15",
-                  "outsiderButeur", "outsiderPointeur", "outsider"];
+                  "outsiderButeur", "outsiderPointeur", "outsiderDoubleButeur",
+                  "outsiderTripleButeur", "outsiderDoublePointeur", "outsiderTriplePointeur",
+                  "outsider"];
 const ordonneMk = (m) => m.slice().sort((a, b) => ORDRE_MK.indexOf(a) - ORDRE_MK.indexOf(b));
 function morceauxResultats(date, jeux, marches) {
   const entete = "📅 <b>" + esc(date) + "</b> · " + jeux.length + " match" + (jeux.length > 1 ? "s" : "");
@@ -654,6 +715,43 @@ function morceauxResultats(date, jeux, marches) {
   }
   morceaux.push(buf);
   return morceaux;
+}
+
+/* ---------- top du jour : le meilleur de chaque filtre actif ---------- */
+function blocTop(date, jeux, marches) {
+  if (!jeux.length) return "Aucun match le " + esc(date) + ".";
+  const L = ["🌟 <b>TOP DU JOUR — " + esc(date) + "</b>"];
+  const med = ["🥇", "🥈", "🥉"];
+  marches.forEach((mk) => {
+    const lab = (MARCHES.find((x) => x[0] === mk) || [mk, mk])[1].toUpperCase();
+    const rows = [];
+    if (mk === "duo15" || mk === "trio15" || mk === "doubleChance" || mk === "tripleChance") {
+      const nk = { duo15: "duo15", trio15: "trio15", doubleChance: "double", tripleChance: "triple" }[mk];
+      const sep = (mk === "duo15" || mk === "trio15") ? " + " : " ou ";
+      jeux.forEach((g) => [["away", g.away], ["home", g.home]].forEach(([side, ab]) => {
+        const cb = g.combos && g.combos[side] && g.combos[side][nk];
+        if (cb) rows.push({ txt: cb.members.map((x) => x.name).join(sep) + " (" + ab + ")",
+          prob: cb.prob, conf: cb.confidence, etoiles: cb.etoiles, valeur: cb.valeur, g });
+      }));
+    } else if (OUTS_CHAMP[mk]) {
+      jeux.forEach((g) => (g[OUTS_CHAMP[mk]] || []).forEach((o) => rows.push({
+        txt: o.name + " (" + o.abbr + ") — " + o.mk + " n°" + o.rank,
+        prob: o.prob, conf: o.confidence, etoiles: o.etoiles, valeur: o.valeur, g })));
+    } else {
+      jeux.forEach((g) => (g.players || []).forEach((p) => {
+        if (p[mk] && p[mk].rank) rows.push({ txt: p.name + " (" + p.abbr + " vs " + p.opp + ")",
+          prob: p[mk].prob, conf: p[mk].confidence, etoiles: p[mk].etoiles, valeur: p[mk].valeur, g });
+      }));
+    }
+    rows.sort((a, b) => b.conf - a.conf || b.prob - a.prob);
+    if (!rows.length) return;
+    L.push("<b>" + lab + "</b>");
+    rows.slice(0, 3).forEach((r, i) => L.push(" " + med[i] + " " + esc(r.txt) + " — " + pct(r.prob)
+      + " " + (r.etoiles || "") + vTxt(r.valeur)
+      + "\n    indice " + f1(r.conf) + " · " + heureFr(r.g.startUtc)));
+  });
+  L.push("\n✅ sûr = tête du marché, indice solide · 🔥 valeur = forme très forte sur 3 matchs.");
+  return L.join("\n");
 }
 
 /* ---------- navigation par boutons ---------- */
@@ -691,6 +789,10 @@ async function traiteCallback(data, d) {
   if (cmd === "Y") {
     const jeux = await jourAdapte(date, d);
     return { envoie: [texteGardiens(date, jeux, await overridesJour(date))], clavier: kbMenu(etat, d) };
+  }
+  if (cmd === "O") {
+    const jeux = await jourAdapte(date, d);
+    return { envoie: morceauxResultats ? [blocTop(date, jeux, ordonneMk(codes.map((c) => MK_CODE[c])))].filter(Boolean) : [], clavier: kbMenu(etat, d) };
   }
   if (cmd === "P") return { envoie: [blocPodium(date, await jourAdapte(date, d))], clavier: kbMenu(etat, d) };
   if (cmd === "K") return { edit: { texte: "📅 <b>Choisis un jour</b> :", clavier: kbJours(etat, d) } };

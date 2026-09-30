@@ -139,7 +139,7 @@ def seuils_markets(rec, lam_g, lam_p, log, cap=None):
             why += f" Réalisé {deja} fois sur les {n_log} derniers matchs."
         rec[mk] = {"score": score, "prob": prob, "lam": round(lam, 3),
                    "confidence": 0.0, "palier": pal, "etoiles": etoiles(pal),
-                   "rank": None, "why": why}
+                   "rank": None, "why": why, "logHit": {"deja": deja, "n": n_log}}
 
 
 def f1(x):
@@ -195,6 +195,23 @@ def confidence(prob, gp, flags, preseason):
     if preseason:
         c_data *= 0.80
     return 0.80 * c_rank + 0.20 * c_data
+
+
+def valeur_label(p, conf, rank=None):
+    """Étiquette de lecture : SÛR / PROBABLE / VALUE.
+    SÛR = tête du marché (top 2) avec un indice solide — le pari le plus sûr.
+    VALUE = les 3 derniers matchs sont nettement au-dessus de sa saison (forme
+    très remarquée) : le marché le sous-évalue probablement.
+    PROBABLE = le cas général. Seuil 70 relatif au rang : la confiance n'a pas
+    la même échelle selon les marchés (rare en « buteur », fréquente en « 1+ point »)."""
+    if conf and conf >= 70 and rank and rank <= 2:
+        return "SUR"
+    f3 = p.get("form3") or {}
+    if (f3.get("n") or 0) >= 3 and (p.get("gp") or 0) >= 10 and (f3.get("pts") or 0) >= 3:
+        saison = (p.get("perGame") or {}).get("pts") or 0
+        if saison <= 0 or (f3["pts"] / 3.0) >= 1.5 * saison:
+            return "VALUE"
+    return "PROBABLE"
 
 
 def run(raw):
@@ -382,6 +399,8 @@ def run(raw):
                             key=lambda p: (-p[mk]["confidence"], -p[mk]["score"], p["name"]))
             for i, p in enumerate(ranked):
                 p[mk]["rank"] = i + 1
+            for p in players:
+                p[mk]["valeur"] = valeur_label(p, p[mk]["confidence"], p[mk]["rank"])
 
         for mk in SEUILS_MK:
             # indice affiché = même formule que les marchés simples ; le palier,
@@ -396,13 +415,24 @@ def run(raw):
                             key=lambda p: (-p[mk]["score"], p["name"]))
             for i, p in enumerate(ranked):
                 p[mk]["rank"] = i + 1
+            for p in players:
+                p[mk]["valeur"] = valeur_label(p, p[mk]["confidence"] or 0.0, p[mk]["rank"])
 
         # ---------- outsiders : de la valeur réelle hors des favoris ----------
         # Un outsider = hors du top 3, mais classé (rang 4-12), indice solide (>= 45)
         # et AU MOINS un signal chiffré : forme, adversaire qui lui réussit,
         # régression favorable, palier de carrière. Sans signal, pas d'outsider.
+        MK_FR = {"doubleButeur": "2+ buts", "tripleButeur": "3+ buts",
+                 "doublePointeur": "2+ points", "triplePointeur": "3+ points"}
+
         def _outsiders(mkt=None):
-            """mkt=None → mixte (le meilleur marché du joueur) ; sinon marché imposé."""
+            """mkt=None → mixte (le meilleur marché du joueur) ; sinon marché imposé.
+            Marchés à seuils (2+/3+) : événements rares → indice plancher plus
+            bas (30) mais au moins 2 étoiles au barème du marché."""
+            est_seuil = mkt in SEUILS_MK
+            min_conf, need_pal = (45, 1)
+            if est_seuil:
+                min_conf, need_pal = (20 if mkt == "tripleButeur" else 30), 2
             top3 = {p["id"] for m2 in ((mkt,) if mkt else ("buteur", "pointeur"))
                     for p in players if p[m2]["rank"] and p[m2]["rank"] <= 3}
             out = []
@@ -412,7 +442,9 @@ def run(raw):
                 mk = mkt or ("pointeur" if (p["pointeur"]["confidence"] or 0) >=
                              (p["buteur"]["confidence"] or 0) else "buteur")
                 conf = p[mk]["confidence"] or 0
-                if conf < 45 or not p[mk]["rank"] or not (4 <= p[mk]["rank"] <= 12):
+                if conf < min_conf or not p[mk]["rank"] or not (4 <= p[mk]["rank"] <= 12):
+                    continue
+                if est_seuil and (p[mk].get("palier") or 1) < need_pal:
                     continue
                 bits = []
                 f5 = p["form"] or {}
@@ -430,12 +462,21 @@ def run(raw):
                 ms = (p["milestones"] or {}).get("pts") or {}
                 if ms.get("gap") and ms["gap"] <= 3 and (ms.get("next") or 0) >= 100:
                     bits.append(f"à {ms['gap']} points de {ms['next']} en carrière : il va les chercher")
+                if est_seuil:
+                    lh = p[mk].get("logHit") or {}
+                    kk, base = SEUILS_MK[mk]
+                    if (lh.get("deja") or 0) >= 2 and lh.get("n"):
+                        bits.append("a déjà signé " + str(kk) + "+ "
+                                    + ("buts" if base == "g" else "points")
+                                    + " " + str(lh["deja"]) + " fois sur ses "
+                                    + str(lh["n"]) + " derniers matchs")
                 if not bits:
                     continue
                 out.append({"id": p["id"], "name": p["name"], "abbr": p["abbr"],
-                            "mk": mk, "rank": p[mk]["rank"],
+                            "mk": MK_FR.get(mk, mk), "rank": p[mk]["rank"],
                             "prob": p[mk]["prob"], "confidence": conf,
                             "palier": p[mk]["palier"], "etoiles": p[mk]["etoiles"],
+                            "valeur": p[mk].get("valeur") or "PROBABLE",
                             "why": " ; ".join(bits[:2]) + "."})
             out.sort(key=lambda x: -x["confidence"])
             retenus = []
@@ -450,6 +491,10 @@ def run(raw):
         retenus = _outsiders()
         outs_buteur = _outsiders("buteur")
         outs_pointeur = _outsiders("pointeur")
+        outs_2b = _outsiders("doubleButeur")
+        outs_3b = _outsiders("tripleButeur")
+        outs_2p = _outsiders("doublePointeur")
+        outs_3p = _outsiders("triplePointeur")
 
         # ---------- double / triple chance buteur : top 2 ou 3 de l'équipe ----------
         # Le pari passe si L'UN des joueurs marque. P(aucun ne marque) =
@@ -475,8 +520,10 @@ def run(raw):
             pal = palier_bareme(pc100, mk_key)
             conf = js_round(0.6 * sum(p["buteur"]["confidence"] or 0 for p in sel) / n
                             + 0.4 * pc100, 1)
+            val = ("VALUE" if any(p["buteur"].get("valeur") == "VALUE" for p in sel)
+                   else ("SUR" if conf >= 65 else "PROBABLE"))
             return {"prob": prob, "palier": pal, "etoiles": etoiles(pal),
-                    "confidence": conf,
+                    "confidence": conf, "valeur": val,
                     "members": [{"id": p["id"], "name": p["name"], "abbr": p["abbr"],
                                  "prob": p["buteur"]["prob"],
                                  "confidence": p["buteur"]["confidence"],
@@ -496,6 +543,8 @@ def run(raw):
             "venue": g.get("venue"), "ctx": ctx, "players": players,
             "compo": g.get("compo"), "outsiders": retenus,
             "outsidersButeur": outs_buteur, "outsidersPointeur": outs_pointeur,
+            "outsidersDoubleButeur": outs_2b, "outsidersTripleButeur": outs_3b,
+            "outsidersDoublePointeur": outs_2p, "outsidersTriplePointeur": outs_3p,
             "combos": combos,
         })
 
@@ -623,6 +672,7 @@ def rookie_record(p, ctx, land, bio, lg_sh_pct, preseason):
         "perGame": {"g": round(gpg_nhl, 2), "a": round(apg_nhl, 2),
                     "pts": round(ppg_nhl, 2), "sh": round(shpg, 1)},
         "form": {"n": 0, "g": 0.0, "pts": 0.0, "sh": 0.0, "toiMin": None},
+        "form3": {"n": 0, "g": 0, "pts": 0},
         "lambda": {"g": round(lam_g, 3), "a": round(lam_a, 3), "pts": round(lam_p, 3)},
         "lambdaSansGardien": {"g": round(lam_g_nog, 3), "a": round(lam_a_nog, 3)},
         "milestones": {"g": {"next": None, "gap": None, "f": 0.0},
@@ -698,6 +748,9 @@ def player_record(p, ctx, sk_by_season, log, active, ref, career, lg_sh_pct,
 
     # --- 2. forme (5 derniers matchs) et absence ---
     form = log[:5]
+    form3 = log[:3]
+    f3g = sum(x.get("goals", 0) for x in form3)
+    f3p = sum(x.get("points", 0) for x in form3)
     formG = formP = formSh = 0.0
     formToi = None
     if form:
@@ -786,6 +839,7 @@ def player_record(p, ctx, sk_by_season, log, active, ref, career, lg_sh_pct,
                     "sh": round(shpg, 1)},
         "form": {"n": len(form), "g": round(formG, 2), "pts": round(formP, 2),
                  "sh": round(formSh, 1), "toiMin": round(formToi, 1) if formToi else None},
+        "form3": {"n": len(form3), "g": f3g, "pts": f3p},
         "lambda": {"g": round(lam_g, 3), "a": round(lam_a, 3), "pts": round(lam_p, 3)},
         "lambdaSansGardien": {"g": round(lam_g_nog, 3), "a": round(lam_a_nog, 3)},
         "milestones": {"g": {"next": nxtG, "gap": gapG, "f": round(msG, 2)},

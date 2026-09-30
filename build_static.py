@@ -48,7 +48,7 @@ def version_index(joueur):
         m = joueur[mk]
         p[mk] = {"score": m["score"], "prob": m["prob"], "confidence": m["confidence"],
                  "palier": m["palier"], "etoiles": m["etoiles"], "rank": m["rank"],
-                 "lam": m["lam"],
+                 "lam": m["lam"], "valeur": m.get("valeur") or "PROBABLE",
                  "why": m["why"] if m["rank"] and m["rank"] <= 3 else raccourcir(m["why"])}
     if "recrue" in joueur:
         rc = joueur["recrue"]

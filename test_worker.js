@@ -176,6 +176,53 @@ let WORKER;
   const yb = await clique("Y:13@0");
   ok(yb.textes.includes("🥅") && !!yb.clavier, "bouton 🥅 Gardiens → annonce + menu");
 
+  // ---------- outsiders à seuils, étiquettes SÛR/🔥, top du jour ----------
+  const jeuxD = INDEX.games.filter((g) => g.date === defaut);
+  const jeu2p = jeuxD.find((g) => (g.outsidersDoublePointeur || []).length);
+  if (jeu2p) {
+    const num2 = jeuxD.indexOf(jeu2p) + 1;
+    const q2p = await dire("outsider 2 points match " + num2);
+    const o2 = jeu2p.outsidersDoublePointeur[0];
+    ok(q2p.textes.includes("OUTSIDER 2+ POINTS") && q2p.textes.includes(o2.name)
+      && q2p.textes.includes(o2.why.split(" ; ")[0].slice(0, 18)),
+      "outsider 2+ points : bloc + n°1 (" + o2.name + ") + justification");
+  } else {
+    const q2p = await dire("outsider 2 points");
+    ok(!q2p.textes.includes("OUTSIDER 2+ POINTS"), "outsider 2+ points : aucun ce jour → pas de bloc");
+  }
+
+  const tp = await dire("top");
+  ok(tp.textes.includes("TOP DU JOUR") && tp.textes.includes("🥇") && tp.textes.includes("indice"),
+    "/top : top du jour structuré");
+
+  // exactitude : top 3 buteur = tri par indice sur les joueurs du jour
+  const rowsB = [];
+  jeuxD.forEach((g) => {
+    const j = jd.games.find((x) => String(x.id) === String(g.id)) || {};
+    (j.players || []).forEach((p) => { if (p.buteur && p.buteur.rank) rowsB.push(p); });
+  });
+  rowsB.sort((a, b) => b.buteur.confidence - a.buteur.confidence || b.buteur.prob - a.buteur.prob);
+  const top3B = rowsB.slice(0, 3);
+  ok(top3B.length > 0 && top3B.every((p) => tp.textes.includes(p.name)
+    && tp.textes.includes(pctT(p.buteur.prob))),
+    "top : sélection buteur EXACTE (tri par indice) — " + top3B.map((p) => p.name).join(" | "));
+  const marq = top3B.filter((p) => p.buteur.valeur === "VALUE" || p.buteur.valeur === "SUR");
+  if (marq.length) {
+    const lig = tp.textes.split("\n").find((l) => l.includes(marq[0].name)) || "";
+    ok(lig.includes(marq[0].buteur.valeur === "VALUE" ? "🔥" : "✅"),
+      "top : étiquette " + marq[0].buteur.valeur + " visible sur " + marq[0].name);
+  } else {
+    ok(true, "top : aucune étiquette attendue sur le top 3 buteur du jour");
+  }
+
+  const tdf = await clique("T:13@0:g");
+  ok(tdf.edite.length === 1 && tdf.edite[0].reply_markup.inline_keyboard.flat()
+    .some((x) => /✅ Outsider 2\+ points/.test(x.text)),
+    "mini-app : case « Outsider 2+ points » cochable");
+  const lance = await clique("L:13g@0");
+  ok(!jeu2p || lance.textes.includes("OUTSIDER 2+ POINTS"),
+    "mini-app : 🚀 affiche le bloc outsider 2+ points");
+
   console.log(echecs === 0 ? "RESULTAT WORKER CLOUDFLARE : TOUT EST OK (" + n + " vérifications)"
                            : "RESULTAT WORKER CLOUDFLARE : " + echecs + " ECHECS / " + n);
   process.exit(echecs === 0 ? 0 : 1);
