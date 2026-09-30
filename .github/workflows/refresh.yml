@@ -69,6 +69,10 @@ jobs:
           sed -i "s|__TG_TOKEN__|${{ secrets.TELEGRAM_BOT_TOKEN }}|; s|__TG_SECRET__|${{ secrets.TELEGRAM_WEBHOOK_SECRET }}|; s|__TG_OWNER__|${{ secrets.TELEGRAM_OWNER_ID }}|" \
             dist/netlify/functions/telegram.js
           grep -qE "__TG_(TOKEN|SECRET|OWNER)__" dist/netlify/functions/telegram.js && { echo "injection telegram échouée"; exit 1; }
+          # service worker : version unique par dépôt → les installs installées
+          # purgent leur ancien cache et chargent la nouvelle interface
+          sed -i "s|__SW_VERSION__|nhl-$(date +%s)|" dist/sw.js
+          grep -q "__SW_VERSION__" dist/sw.js && { echo "injection sw échouée"; exit 1; }
           # adresse du proxy Live / Rafraîchir :
           #   · functions Netlify même origine ("/") par défaut ;
           #   · ou Worker Cloudflare si la variable WORKER_URL est définie.

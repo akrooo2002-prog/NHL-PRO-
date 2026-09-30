@@ -409,7 +409,15 @@ async function boot(){
 function header(){
   const L=S.d.league;
   const br=$("#bReload");
-  if(br) br.onclick=()=>location.reload();
+  if(br) br.onclick=async()=>{                       // ⟳ = vraie actualisation :
+    try{                                              // on vide le cache du service
+      if(window.caches){                              // worker, puis on recharge —
+        const ks=await caches.keys();                 // garantit la dernière version
+        await Promise.all(ks.map(k=>caches.delete(k)));
+      }
+    }catch(e){}
+    location.reload();
+  };
   const b=$("#bRefresh");
   if(b){
     const tx=$("#bRefreshTx");

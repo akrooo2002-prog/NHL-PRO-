@@ -4,7 +4,9 @@
    · les données tentent le réseau d'abord, et retombent sur le cache sinon.
    Les photos de joueurs viennent d'assets.nhle.com : hors ligne elles
    manquent, l'app affiche les initiales à la place. */
-const VERSION = "nhl-pronos-v2";
+// Version remplacée à chaque dépôt par GitHub Actions (date du build) :
+// le cache change donc de nom à chaque mise à jour, l'ancien est purgé.
+const VERSION = "__SW_VERSION__";
 const COQUILLE = ["/", "/app.html", "/manifest.webmanifest",
                   "/icons/icon-192.png", "/icons/icon-512.png"];
 
@@ -35,16 +37,16 @@ self.addEventListener("fetch", e => {
     return;
   }
 
-  // interface : cache d'abord, mise à jour en arrière-plan
+  // interface : réseau d'abord, cache en secours — toujours la dernière
+  // version en ligne ; hors ligne, le cache prend le relais.
   if (req.mode === "navigate" || COQUILLE.includes(url.pathname)) {
-    e.respondWith(caches.match(req).then(c => {
-      const maj = fetch(req).then(r => {
-        if (r && r.ok) caches.open(VERSION).then(x => x.put(req, r.clone())).catch(() => {});
-        return r;
-      }).catch(() => null);
-      if (c) { maj; return c; }
-      return maj.then(r => r || caches.match("/app.html"));
-    }));
+    e.respondWith(fetch(req).then(r => {
+      if (r && r.ok) {
+        const copie = r.clone();
+        caches.open(VERSION).then(c => c.put(req, copie)).catch(() => {});
+      }
+      return r;
+    }).catch(() => caches.match(req).then(c => c || caches.match("/app.html"))));
     return;
   }
 
