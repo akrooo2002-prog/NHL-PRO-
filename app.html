@@ -555,7 +555,8 @@ function confiance(prob,gp,flags,pre){
   return 0.80*c+0.20*d;
 }
 function goalieOptions(game,abbr){
-  const probable=(game.ctx.away.abbr===abbr?game.ctx.away.goalie:game.ctx.home.goalie)||{};
+  // ctx[side].goalie porte le gardien ADVERSE : le probable d'une équipe est dans le ctx opposé
+  const probable=(game.ctx.away.abbr===abbr?game.ctx.home.goalie:game.ctx.away.goalie)||{};
   const base=(S.d.goalieList&&S.d.goalieList[abbr])||[];
   const out=[], seen=new Set();
   const add=gk=>{ if(gk&&gk.playerId&&!seen.has(gk.playerId)){seen.add(gk.playerId);out.push(gk);} };
@@ -917,10 +918,12 @@ function carte(g0,n){
   bi.onclick=()=>{analyserInstant(g0);};
   h.appendChild(bi);
   c.appendChild(h);
-  const ga=g.ctx.away.goalie, gh=g.ctx.home.goalie;
-  c.appendChild(el("div","gk",'Gardiens probables : <b>'+esc(gh?.name||"?")+"</b> ("+pcx(gh?.sv)+") pour "
-    +esc(g.home)+' · <b>'+esc(ga?.name||"?")+"</b> ("+pcx(ga?.sv)+") pour "+esc(g.away)
-    +' <span class="pill">estimé</span>'));
+  // ctx[side].goalie porte le gardien ADVERSE : away ← ctx.home, home ← ctx.away
+  const ga=g.ctx.home.goalie, gh=g.ctx.away.goalie;
+  const gpl=x=>(x&&x.estimated===false)?"<span class='pill g'>✅ confirmé</span>":"<span class='pill'>estimé</span>";
+  c.appendChild(el("div","gk",'Gardiens : <b>'+esc(gh?.name||"?")+"</b> ("+pcx(gh?.sv)+") pour "
+    +esc(g.home)+" "+gpl(gh)+' · <b>'+esc(ga?.name||"?")+"</b> ("+pcx(ga?.sv)+") pour "+esc(g.away)
+    +" "+gpl(ga)));
   const gr=el("div","grid g3");
   MKS.forEach(mk=>{
     const box=el("div");
@@ -1191,7 +1194,7 @@ async function rDetail(m){
     box.appendChild(s2);
     if(ovId) box.appendChild(el("div","kv2",'<span class="pill g">gardien confirmé par vous</span>'));
     if(me.goalie&&me.goalie.estimated===false&&!ovId)
-      box.appendChild(el("div","kv2",'<span class="pill g">📋 partant officiel (compos NHL)</span>'));
+      box.appendChild(el("div","kv2",'<span class="pill g">✅ gardien confirmé (Daily Faceoff)</span>'));
     cg.appendChild(box);
   });
   m.appendChild(cg);

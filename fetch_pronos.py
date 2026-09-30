@@ -12,8 +12,10 @@ Usage:  python3 fetch_pronos.py [jours_a_venir=21]
 """
 import json
 import os
+import re
 import sys
 import time
+import unicodedata
 import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -347,6 +349,86 @@ def collecte(games, log=print, saisons=None, workers=None, box=None, logs_n=None
     return payload
 
 
+# ---------- gardiens CONFIRMÉS par les clubs (Daily Faceoff) ----------
+# Les équipes annoncent officiellement leur partant dans la journée ; Daily
+# Faceoff les centralise avec le statut « Confirmed ». On n'injecte QUE les
+# confirmés — le reste demeure une estimation. Le pipeline repasse toutes les
+# 2 heures : chaque confirmation est captée au fil de l'eau.
+DFO_URL = "https://www.dailyfaceoff.com/starting-goalies"
+DFO_UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+          "Accept": "text/html"}
+
+
+def _norme(s):
+    return (unicodedata.normalize("NFD", str(s or "")).encode("ascii", "ignore")
+            .decode().lower().strip())
+
+
+def dailyfaceoff_overrides(payload):
+    """Gardiens confirmés → overrides {id_match: {"goalies": {"away"|"home": playerId}}}."""
+    try:
+        req = urllib.request.Request(DFO_URL, headers=DFO_UA)
+        html = urllib.request.urlopen(req, timeout=25).read().decode("utf-8", "replace")
+        m = re.search(r'<script id="__NEXT_DATA__" type="application/json"[^>]*>(.*?)</script>',
+                      html, re.S)
+        rows = ((json.loads(m.group(1)).get("props", {}).get("pageProps", {}) or {})
+                .get("data") or [])
+    except Exception as e:
+        print(f"     Daily Faceoff indisponible (estimations conservées) : {e}")
+        return {}
+    nom2abbr = {}
+    for ab, t in (payload.get("teamIndex") or {}).items():
+        if t.get("nameEn"):
+            nom2abbr[_norme(t["nameEn"])] = ab
+    par_date = {}
+    for g in payload["games"]:
+        par_date.setdefault(g["date"], {})[g["away"]] = g
+        par_date.setdefault(g["date"], {})[g["home"]] = g
+
+    def pid_gardien(abbr, nom):
+        cible = _norme(nom)
+        if not cible:
+            return None
+        for gg in (payload.get("rosters", {}).get(abbr, {}) or {}).get("goalies", []):
+            plein = _norme(f"{(gg.get('firstName') or {}).get('default', '')} "
+                           f"{(gg.get('lastName') or {}).get('default', '')}")
+            if plein == cible:
+                return gg["id"]
+        for gg in (payload.get("rosters", {}).get(abbr, {}) or {}).get("goalies", []):
+            plein = _norme(f"{(gg.get('firstName') or {}).get('default', '')} "
+                           f"{(gg.get('lastName') or {}).get('default', '')}")
+            if cible.split()[-1] and cible.split()[-1] in plein.split():
+                return gg["id"]
+        return None
+
+    out, n_ok, n_rate = {}, 0, 0
+    for r in rows:
+        jour = par_date.get(r.get("date"))
+        if not jour:
+            continue
+        for cote, cle_eq, cle_gk, cle_st in (
+                ("away", "awayTeamName", "awayGoalieName", "awayNewsStrengthName"),
+                ("home", "homeTeamName", "homeGoalieName", "homeNewsStrengthName")):
+            if (r.get(cle_st) or "") != "Confirmed":
+                continue
+            ab = nom2abbr.get(_norme(r.get(cle_eq)))
+            g = jour.get(ab) if ab else None
+            if not g:
+                continue
+            pid = pid_gardien(ab, r.get(cle_gk))
+            if pid is None:
+                n_rate += 1
+                continue
+            ent = out.setdefault(str(g["id"]), {"goalies": {}, "absents": []})
+            ent["goalies"][cote] = pid
+            n_ok += 1
+    msg = f"     Daily Faceoff : {n_ok} gardien(s) confirmé(s) injecté(s)"
+    if n_rate:
+        msg += f", {n_rate} non retrouvé(s) dans les effectifs"
+    print(msg)
+    return out
+
+
 def main(argv=None):
     argv = argv if argv is not None else sys.argv[1:]
     days = int(argv[0]) if argv and argv[0].isdigit() else 35
@@ -356,6 +438,8 @@ def main(argv=None):
     games = fetch_games(days)
     print(f"     {len(games)} matchs sur {days} jours")
     payload = collecte(games)
+    print("     gardiens confirmés (Daily Faceoff)…")
+    payload["overrides"] = dailyfaceoff_overrides(payload)
     path = os.path.join(OUT, "pronos.json")
     with open(path, "w") as fh:
         json.dump(payload, fh, separators=(",", ":"))

@@ -141,12 +141,9 @@ const note = (cond, label, extra = "") => {
   // ---------- 1. rendu des onglets ----------
   console.log("\n--- rendu ---");
   const nJoueurs = S.d.games[0].players.length;
-  // les onglets « matchs » et « select » dépendent du jour rendu : seuils
-  // proportionnels au nombre de matchs (un jour d'ouverture à 3 matchs est normal)
-  const tParis = new Date().toLocaleDateString("sv-SE", { timeZone: "Europe/Paris" });
-  const dsAll = [...new Set(S.d.games.map((g) => g.date))].sort();
-  const jourRendu = dsAll.find((x) => x >= tParis) || dsAll[dsAll.length - 1];
-  const nMatchsJour = Math.max(1, S.d.games.filter((g) => g.date === jourRendu).length);
+  // les onglets « matchs » et « select » dépendent du jour rendu (S.date) :
+  // seuils proportionnels au nombre de matchs (un jour d'ouverture à 3 matchs est normal)
+  const nMatchsJour = Math.max(1, S.d.games.filter((g) => g.date === S.date).length);
   for (const [name, fn, tag, min] of [["podium", sandbox.rPodium, "DIV", 200],
                                       ["matchs", sandbox.rMatchs, "DIV", Math.max(80, 30 * nMatchsJour)],
                                       ["select", sandbox.rSelect, "DIV", Math.max(20, 6 * nMatchsJour)],

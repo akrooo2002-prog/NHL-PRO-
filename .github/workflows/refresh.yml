@@ -2,7 +2,7 @@
 #
 # Déclenché par :
 #   · le bouton Rafraîchir de l'app (via le Worker Cloudflare) ;
-#   · un cron, deux fois par jour (à décommenter plus bas) ;
+#   · un cron toutes les 2 heures (gardiens confirmés captés au fil de l'eau) ;
 #   · la main : onglet Actions → « Rafraîchir les analyses » → Run workflow.
 #
 # Coût : 0. GitHub offre 2 000 minutes/mois aux dépôts publics (200 en privé).
@@ -12,6 +12,10 @@
 name: Rafraîchir les analyses
 
 on:
+  schedule:
+    # toutes les 2 h : les clubs confirment leurs gardiens au fil de la journée
+    # (Daily Faceoff) — chaque passage capte les nouvelles confirmations.
+    - cron: "7 */2 * * *"
   workflow_dispatch:
     inputs:
       deploy_netlify:

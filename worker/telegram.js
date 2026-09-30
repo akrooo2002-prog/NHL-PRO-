@@ -385,6 +385,10 @@ function texteGardiens(date, jeux, ov) {
     L.push("<b>" + esc(g.away) + " @ " + esc(g.home) + "</b> · " + heureFr(g.startUtc)
       + "\n  " + esc(g.away) + " : " + gkTxt(ga) + "\n  " + esc(g.home) + " : " + gkTxt(gh));
   });
+  const conf = jeux.some((g) => [g.ctx && g.ctx.away && g.ctx.away.goalie,
+    g.ctx && g.ctx.home && g.ctx.home.goalie].some((x) => x && x.estimated === false));
+  if (conf)
+    L.push("\n✅ « confirmé » = partant officiel vérifié (Daily Faceoff) — rien à faire, les analyses sont déjà à jour.");
   const corr = Object.keys(ov || {});
   if (corr.length) L.push("\n🧤 Corrigés : " + corr.map((t) => esc(t) + " → " + esc(ov[t].name)).join(", "));
   L.push("\nTu connais le partant ? Écris « gardien VAN Demko ».\n« gardien annule VAN » pour revenir à l'annonce.");

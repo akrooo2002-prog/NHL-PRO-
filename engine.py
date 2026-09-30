@@ -338,12 +338,15 @@ def run(raw):
             gg = next((x for x in goalie_list.get(ctx[side]["abbr"], [])
                        if x["playerId"] == pid and x.get("sv")), None)
             if gg:
-                ctx[side]["goalie"] = {
+                # ctx[opp] porte le gardien que les joueurs de `opp` affrontent,
+                # c'est-à-dire le gardien de `side` — l'override s'écrit donc là.
+                opp = "home" if side == "away" else "away"
+                ctx[opp]["goalie"] = {
                     "name": gg["name"], "playerId": gg["playerId"], "sv": gg["sv"],
                     "gaa": gg.get("gaa"), "gp": gg.get("gp"), "starts": None,
                     "ofLast": None, "lastGame": None, "lastSv": None,
                     "estimated": False}
-                ctx[side]["goalieF"] = clamp((1 - gg["sv"]) / (1 - sv_avg), 0.5, 1.8)
+                ctx[opp]["goalieF"] = clamp((1 - gg["sv"]) / (1 - sv_avg), 0.5, 1.8)
 
         players = []
         for side in ("away", "home"):
