@@ -67,6 +67,7 @@ const AIDE =
   "/outsiderbuteur — outsider du marché buteur\n" +
   "/outsiderpointeur — outsider du marché pointeur\n" +
   "/demain — analyse de demain\n" +
+  "/gardien — gardiens probables + corriger un partant\n" +
   "/dates — jours analysés\n" +
   "/aide — cette aide\n\n" +
   "<b>Texte libre</b> — combine comme tu veux :\n" +
@@ -105,15 +106,16 @@ function accueilTexte(d, etat) {
   return "🏒 <b>NHL Pronos</b> — " + esc(date) + "\n"
     + "Filtres actifs : " + st.codes.map((c) => MK_LIB[c]).join(", ") + "\n\n"
     + "Clique sur ⚙️ pour cocher tes marchés, 🗓 pour choisir un match.\n"
-    + "Tu peux aussi m'écrire : « buteur outsider FLA ».";
+    + "Tu peux aussi m'écrire : « buteur outsider FLA »\n"
+    + "ou « gardien VAN Demko » pour adapter les analyses à un gardien.";
 }
 function kbMenu(etat, d) {
   const ds = dates(d), st = decodeEtat(etat);
   const date = ds[Math.min(st.jourIdx, ds.length - 1)] || "";
   return { inline_keyboard: [
     [btn("⚙️ Filtres", "F:" + etat), btn("🗓 Matchs", "G:" + etat)],
-    [btn("🏆 Podium", "P:" + etat), btn("📅 " + date.slice(5).replace("-", "/"), "K:" + etat)],
-    [btn("❓ Aide", "A")],
+    [btn("🏆 Podium", "P:" + etat), btn("🥅 Gardiens", "Y:" + etat)],
+    [btn("📅 " + date.slice(5).replace("-", "/"), "K:" + etat), btn("❓ Aide", "A")],
   ] };
 }
 function kbFiltres(etat) {
@@ -163,6 +165,293 @@ async function jourComplet(date) {
   const parId = {};
   jd.games.forEach((x) => { parId[x.id] = x; });
   return jeuxDuJour(d, date).map((g) => Object.assign({}, g, { players: (parId[g.id] || {}).players || [] }));
+}
+
+/* ---------- gardiens : annonce, saisie manuelle, adaptation fidèle ---------- */
+const PALIERS_DEF = [[88, 5], [75, 4], [62, 3], [50, 2], [0, 1]];
+const BAREMES_DEF = {
+  doubleButeur: [[8, 5], [5, 4], [2.5, 3], [1, 2], [0, 1]],
+  tripleButeur: [[3, 5], [2, 4], [1, 3], [0.5, 2], [0, 1]],
+  doublePointeur: [[35, 5], [25, 4], [15, 3], [8, 2], [0, 1]],
+  triplePointeur: [[12, 5], [8, 4], [4, 3], [2, 2], [0, 1]],
+  doubleChance: [[65, 5], [55, 4], [45, 3], [35, 2], [0, 1]],
+  tripleChance: [[75, 5], [65, 4], [55, 3], [45, 2], [0, 1]],
+  duo15: [[40, 5], [30, 4], [22, 3], [14, 2], [0, 1]],
+  trio15: [[50, 5], [40, 4], [30, 3], [20, 2], [0, 1]],
+};
+const jsRound = (x, nd) => { const f = Math.pow(10, nd === undefined ? 1 : nd); return Math.floor(x * f + 0.5) / f; };
+const clampGardien = (x) => Math.max(0.5, Math.min(1.8, x));
+function poissonGeq(lam, k) {
+  if (lam <= 0) return 0;
+  let s2 = 0, t = Math.exp(-lam);
+  for (let i = 0; i < k; i++) { s2 += t; t *= lam / (i + 1); }
+  return Math.max(0, 1 - s2);
+}
+const etoilesDe = (n) => "★".repeat(n) + "☆".repeat(5 - n);
+function palierDe(c, paliers) { for (const [seuil, n] of paliers) if (c >= seuil) return n; return 1; }
+function baremeDe(score, mk, baremes) { for (const [seuil, n] of (baremes[mk] || [])) if (score >= seuil) return n; return 1; }
+// même indice que engine.py : 80 % la probabilité du marché, 20 % la fiabilité des données.
+function confidenceFr(prob, gp, flags, preseason) {
+  const cRank = 100 * Math.pow(Math.max(0, Math.min(1, prob)), 0.55);
+  let cData = 100;
+  if (gp < 20) cData = 42 + 58 * (gp / 20);
+  else if (gp < 45) cData = 82 + 18 * ((gp - 20) / 25);
+  if (flags.includes("absent")) cData *= 0.30;
+  else if (flags.includes("hors_echantillon")) cData *= 0.90;
+  if (flags.includes("echantillon")) cData *= 0.88;
+  if (flags.includes("b2b")) cData *= 0.93;
+  if (preseason) cData *= 0.80;
+  return 0.80 * cRank + 0.20 * cData;
+}
+const f1fr = (x) => (x === null || x === undefined ? "—" : Number(x).toFixed(1).replace(".", ","));
+const f2fr = (x) => (x === null || x === undefined ? "—" : Number(x).toFixed(2).replace(".", ","));
+const pcfr = (x, dd) => (x === null || x === undefined ? "—"
+  : (x * 100).toFixed(dd === undefined ? 1 : dd).replace(".", ",") + " %");
+
+// ---- gardiens corrigés à la main : stockage Cloudflare KV (vie : 3 jours) ----
+async function overridesJour(date) {
+  if (!ENV.GARDIENS) return {};
+  try {
+    const l = await ENV.GARDIENS.list({ prefix: "g:" + date + ":" });
+    const out = {};
+    (l.keys || []).forEach((k) => {
+      const t = (k.name.split(":")[2] || "").trim();
+      if (t && k.metadata) out[t] = k.metadata;
+    });
+    return out;
+  } catch (e) { return {}; }
+}
+async function poseGardien(date, team, g) {
+  if (!ENV.GARDIENS) return false;
+  await ENV.GARDIENS.put("g:" + date + ":" + team, "", {
+    metadata: { name: g.name, playerId: g.playerId, sv: g.sv }, expirationTtl: 259200,
+  });
+  return true;
+}
+async function retireGardien(date, team) {
+  if (!ENV.GARDIENS) return false;
+  await ENV.GARDIENS.delete("g:" + date + ":" + team);
+  return true;
+}
+
+// ---- adaptation : MÊMES formules que engine.py, via les λ publiées sans gardien ----
+// λ'g = λg(sans gardien) × f'   ;   λ'a = (λa(sans gardien) − 0,6·λg) × f' + 0,6·λ'g
+function adapteMatch(m, ov, d) {
+  const paliers = d.paliers || PALIERS_DEF;
+  const baremes = d.baremes || BAREMES_DEF;
+  const svMoy = (d.league && d.league.savePctAvg) || 0.8945;
+  const preseason = !!m.preseason;
+  m.adaptations = [];
+  for (const side of ["away", "home"]) {
+    const o = ov[m[side]];
+    if (!o || !o.sv) continue;
+    const oppSide = side === "away" ? "home" : "away";
+    const ctx = m.ctx[oppSide];                     // joueurs qui font face à ce gardien
+    const fNouv = clampGardien((1 - o.sv) / (1 - svMoy));
+    m.adaptations.push({ equipe: m[side], nom: o.name,
+      ancien: (ctx.goalie || {}).name || null, fNouv });
+    ctx.goalie = { name: o.name, playerId: o.playerId, sv: o.sv, estimated: false };
+    for (const p of m.players) {
+      if (p.abbr !== m[oppSide] || !p.lambdaSansGardien || p.recrue) continue;
+      const ng = p.lambdaSansGardien.g * fNouv;
+      const na = (p.lambdaSansGardien.a - 2 * 0.30 * p.lambda.g) * fNouv + 2 * 0.30 * ng;
+      const np = ng + na;
+      p.lambda = { g: jsRound(ng, 3), a: jsRound(na, 3), pts: jsRound(np, 3) };
+      p.goalieF = fNouv; p.oppGoalie = o.name;
+      [["buteur", ng], ["passeur", na], ["pointeur", np]].forEach(([mk, lam]) => {
+        const rec = p[mk]; if (!rec) return;
+        rec.prob = Math.round((1 - Math.exp(-lam)) * 10000) / 10000;
+        rec.lam = jsRound(lam, 3);
+        rec.score = jsRound(100 * rec.prob, 1);
+        if (rec.score > 0) {
+          rec.confidence = jsRound(confidenceFr(rec.prob, p.gp, p.flags || [], preseason), 1);
+          rec.palier = palierDe(rec.confidence, paliers);
+        } else { rec.confidence = 0; rec.palier = 1; }
+        rec.etoiles = etoilesDe(rec.palier);
+        rec.rank = null;
+      });
+      [["doubleButeur", ng, 2], ["tripleButeur", ng, 3],
+       ["doublePointeur", np, 2], ["triplePointeur", np, 3]].forEach(([mk, lam, k]) => {
+        const rec = p[mk]; if (!rec) return;
+        rec.prob = Math.round(poissonGeq(lam, k) * 10000) / 10000;
+        rec.lam = jsRound(lam, 3);
+        rec.score = jsRound(100 * rec.prob, 1);
+        if (rec.score > 0) rec.confidence = jsRound(confidenceFr(rec.prob, p.gp, p.flags || [], preseason), 1);
+        rec.palier = baremeDe(rec.score, mk, baremes);
+        rec.etoiles = etoilesDe(rec.palier);
+        rec.rank = null;
+      });
+    }
+  }
+  if (!m.adaptations.length) return m;
+  // mêmes départages que le moteur : indice → score affiché → nom (ordre codepoint)
+  const cmpNom = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+  ["buteur", "passeur", "pointeur"].forEach((mk) => {
+    m.players.filter((p) => p[mk] && p[mk].score > 0)
+      .sort((a, b) => b[mk].confidence - a[mk].confidence || b[mk].score - a[mk].score || cmpNom(a.name, b.name))
+      .forEach((p, i) => { p[mk].rank = i + 1; });
+  });
+  ["doubleButeur", "tripleButeur", "doublePointeur", "triplePointeur"].forEach((mk) => {
+    m.players.filter((p) => p[mk] && p[mk].score > 0)
+      .sort((a, b) => b[mk].score - a[mk].score || cmpNom(a.name, b.name))
+      .forEach((p, i) => { p[mk].rank = i + 1; });
+  });
+  m.outsiders = outsidersDe(m, null);
+  m.outsidersButeur = outsidersDe(m, "buteur");
+  m.outsidersPointeur = outsidersDe(m, "pointeur");
+  m.combos = {};
+  [["away", m.away], ["home", m.home]].forEach(([side, ab]) => {
+    m.combos[side] = {
+      double: comboDe(m, ab, 2, "doubleChance", 1, baremes),
+      triple: comboDe(m, ab, 3, "tripleChance", 1, baremes),
+      duo15: comboDe(m, ab, 2, "duo15", 2, baremes),
+      trio15: comboDe(m, ab, 3, "trio15", 2, baremes),
+    };
+  });
+  return m;
+}
+// outsiders : port exact de _outsiders() d'engine.py
+function outsidersDe(m, mkt) {
+  const mks = mkt ? [mkt] : ["buteur", "pointeur"];
+  const top3 = new Set();
+  mks.forEach((m2) => m.players.forEach((p) => {
+    if (p[m2] && p[m2].rank && p[m2].rank <= 3) top3.add(p.id);
+  }));
+  const out = [];
+  for (const p of m.players) {
+    if (top3.has(p.id) || (p.flags || []).includes("absent") || p.recrue) continue;
+    const mk = mkt || ((p.pointeur.confidence || 0) >= (p.buteur.confidence || 0) ? "pointeur" : "buteur");
+    const conf = p[mk].confidence || 0;
+    if (conf < 45 || !p[mk].rank || p[mk].rank < 4 || p[mk].rank > 12) continue;
+    const bits = [];
+    const f5 = p.form || {}, pg = p.perGame || {};
+    if ((f5.n || 0) >= 3 && (f5.pts || 0) >= Math.max(0.6, (pg.pts || 0) * 1.25))
+      bits.push("forme forte (" + f2fr(f5.pts) + " pts/match sur ses " + f5.n + " derniers, saison " + f2fr(pg.pts) + ")");
+    const h = p.h2h || {};
+    if ((h.n || 0) >= 3 && (h.pts || 0) >= Math.max(0.5, (pg.pts || 0) * 1.2))
+      bits.push("réussit contre " + p.opp + " (" + f2fr(h.pts) + " pts/match sur " + h.n + " matchs)");
+    if ((p.regressionRisk || 0) < -6 && p.raw && p.raw.expShPct)
+      bits.push("% de tir froid (" + pcfr(p.raw.shPct) + ") sous son attendu (" + pcfr(p.raw.expShPct) + ") : la remontée joue pour lui");
+    if ((p.flags || []).includes("en_hausse")) bits.push("en hausse nette sur 5 matchs");
+    const ms = (p.milestones || {}).pts || {};
+    if (ms.gap && ms.gap <= 3 && (ms.next || 0) >= 100)
+      bits.push("à " + ms.gap + " points de " + ms.next + " en carrière : il va les chercher");
+    if (!bits.length) continue;
+    out.push({ id: p.id, name: p.name, abbr: p.abbr, mk, rank: p[mk].rank, prob: p[mk].prob,
+      confidence: conf, palier: p[mk].palier, etoiles: p[mk].etoiles,
+      why: bits.slice(0, 2).join(" ; ") + "." });
+  }
+  out.sort((a, b) => b.confidence - a.confidence);
+  const retenus = [];
+  if (out.length) {
+    retenus.push(out[0]);
+    const reste = out.slice(1).filter((x) => x.abbr !== retenus[0].abbr);
+    const autre = reste[0] || (out.length > 1 ? out[1] : null);
+    if (autre && autre.confidence >= retenus[0].confidence - 10) retenus.push(autre);
+  }
+  return retenus;
+}
+// combos : port exact de _combo() d'engine.py
+function comboDe(m, sideAbbr, n, mkKey, k, baremes) {
+  const sel = m.players.filter((p) => p.abbr === sideAbbr && !(p.flags || []).includes("absent")
+    && p.buteur && p.buteur.rank)
+    .sort((a, b) => a.buteur.rank - b.buteur.rank).slice(0, n);
+  if (sel.length < n) return null;
+  let prob;
+  if (k === 1) {
+    let paucun = 1;
+    sel.forEach((p) => { paucun *= 1 - (p.buteur.prob || 0); });
+    prob = Math.round((1 - paucun) * 10000) / 10000;
+  } else {
+    const lam = sel.reduce((som, p) => som + (p.buteur.lam || 0), 0);
+    prob = Math.round(poissonGeq(lam, k) * 10000) / 10000;
+  }
+  const pc100 = prob * 100;
+  const pal = baremeDe(pc100, mkKey, baremes);
+  const conf = jsRound(0.6 * sel.reduce((som, p) => som + (p.buteur.confidence || 0), 0) / n + 0.4 * pc100, 1);
+  return { prob, palier: pal, etoiles: etoilesDe(pal), confidence: conf,
+    members: sel.map((p) => ({ id: p.id, name: p.name, abbr: p.abbr, prob: p.buteur.prob,
+      confidence: p.buteur.confidence, palier: p.buteur.palier })) };
+}
+
+// ---- annonce des gardiens + saisie (« gardien VAN Demko ») ----
+const gkTxt = (g) => (g ? esc(g.name) + " — " + pcfr(g.sv) + (g.estimated ? " (probable)" : " (confirmé)") : "non annoncé");
+function texteGardiens(date, jeux, ov) {
+  if (!jeux.length) return "Aucun match le " + esc(date) + ".";
+  const L = ["🥅 <b>Gardiens — " + esc(date) + "</b>"];
+  jeux.forEach((g) => {
+    const ga = g.ctx && g.ctx.home ? g.ctx.home.goalie : null;   // ctx porte le gardien ADVERSE
+    const gh = g.ctx && g.ctx.away ? g.ctx.away.goalie : null;
+    L.push("<b>" + esc(g.away) + " @ " + esc(g.home) + "</b> · " + heureFr(g.startUtc)
+      + "\n  " + esc(g.away) + " : " + gkTxt(ga) + "\n  " + esc(g.home) + " : " + gkTxt(gh));
+  });
+  const corr = Object.keys(ov || {});
+  if (corr.length) L.push("\n🧤 Corrigés : " + corr.map((t) => esc(t) + " → " + esc(ov[t].name)).join(", "));
+  L.push("\nTu connais le partant ? Écris « gardien VAN Demko ».\n« gardien annule VAN » pour revenir à l'annonce.");
+  return L.join("\n");
+}
+function resolveTeam(txt, d) {
+  if (!txt) return null;
+  const ab = na(txt).toUpperCase();
+  if ((d.teams || {})[ab]) return ab;
+  const cle = na(txt);
+  if (cle.length < 3) return null;
+  return Object.keys(d.teams || {}).find((a) =>
+    String(((d.teams[a] || {}).nameFr) || "").toLowerCase().split(/[^a-z]+/).filter(Boolean)
+      .some((w) => w.length > 3 && cle.includes(w))) || null;
+}
+async function fluxGardien(rest, d) {
+  const date = jourDefaut(d);
+  const jeux = await jourComplet(date);
+  const ov = await overridesJour(date);
+  if (!rest) return [texteGardiens(date, jeux, ov)];
+  const ann = rest.match(/^(annule|annuler|reset|efface|effacer|supprime|supprimer|retire|retirer)\s*(.*)$/i);
+  if (ann) {
+    const team = resolveTeam(ann[2].trim(), d);
+    if (!team) return ["Donne l'équipe : « gardien annule VAN »."];
+    if (!ov[team]) return ["Aucun gardien corrigé pour " + esc(team) + "."];
+    await retireGardien(date, team);
+    return ["↩️ <b>" + esc(team) + "</b> : retour à l'annonce officielle."];
+  }
+  let team = null, nom = rest;
+  const parts = rest.split(/\s+/);
+  const t0 = resolveTeam(parts[0] || "", d);
+  if (t0) { team = t0; nom = rest.slice(parts[0].length).trim(); }
+  if (!nom) return ["Donne le nom du gardien : « gardien " + esc(team || "VAN") + " Demko »."];
+  const liste = team ? (d.goalieList[team] || []).map((g) => Object.assign({ team }, g))
+    : Object.keys(d.goalieList || {}).flatMap((t) => (d.goalieList[t] || []).map((g) => Object.assign({ team: t }, g)));
+  const cle = na(nom);
+  let cands = liste.filter((g) => na(g.name) === cle
+    || na(String(g.name).split(" ").slice(-1)[0]) === cle);
+  if (!cands.length) cands = liste.filter((g) => na(g.name).includes(cle));
+  if (!cands.length)
+    return ["Je ne trouve pas « " + esc(nom) + " »" + (team ? " parmi les gardiens suivis de " + esc(team) : "") + "."
+      + (team ? "\nGardiens suivis : " + (d.goalieList[team] || []).map((g) => esc(g.name)).join(", ") + "." : "")];
+  if (cands.length > 1)
+    return ["Plusieurs gardiens possibles :\n"
+      + cands.slice(0, 6).map((g) => " • " + esc(g.name) + " (" + esc(g.team) + ")").join("\n")
+      + "\nPrécise : « gardien " + esc(cands[0].team) + " " + esc(cands[0].name) + " »."];
+  const gk = cands[0];
+  const tm = team || gk.team;
+  const jeu = jeux.find((x) => x.away === tm || x.home === tm);
+  if (!jeu)
+    return ["✅ " + esc(gk.name) + " noté pour " + esc(tm) + " — mais " + esc(tm)
+      + " ne joue pas le " + esc(date) + ". Rien à adapter."];
+  await poseGardien(date, tm, gk);
+  const ctxOpp = jeu.away === tm ? jeu.ctx.home : jeu.ctx.away;
+  const fOld = ctxOpp.goalieF;
+  adapteMatch(jeu, { [tm]: { name: gk.name, playerId: gk.playerId, sv: gk.sv } }, d);
+  const ad = (jeu.adaptations || [])[0] || {};
+  const head = "✅ <b>Gardien pris en compte : " + esc(gk.name) + " (" + esc(tm) + ")</b> — " + pcfr(gk.sv)
+    + "\nFacteur gardien ×" + f1fr(fOld) + " → ×" + f1fr(ad.fNouv) + " · toutes tes analyses du "
+    + esc(date) + " sont adaptées (3 jours).\n« gardien annule " + esc(tm) + " » pour revenir à l'annonce.\n";
+  return [head + blocMatch(jeu, ["buteur", "pointeur"])];
+}
+async function jourAdapte(date, d) {
+  const jeux = await jourComplet(date);
+  const ov = await overridesJour(date);
+  if (Object.keys(ov).length) jeux.forEach((g) => adapteMatch(g, ov, d));
+  return jeux;
 }
 
 /* ---------- choix du jour ---------- */
@@ -241,6 +530,12 @@ function blocMatch(g, marches) {
   const L = [];
   L.push("🏒 <b>" + esc(g.awayNameFr || g.away) + " @ " + esc(g.homeNameFr || g.home) + "</b> · " + heureFr(g.startUtc)
     + (g.preseason ? " · ⚠️ présaison (probabilités fragiles)" : ""));
+  const gkA = g.ctx && g.ctx.home ? g.ctx.home.goalie : null;   // ctx porte le gardien ADVERSE
+  const gkH = g.ctx && g.ctx.away ? g.ctx.away.goalie : null;
+  if (gkA || gkH)
+    L.push("🥅 " + esc(g.away) + " : " + gkTxt(gkA) + "  ·  " + esc(g.home) + " : " + gkTxt(gkH));
+  if ((g.adaptations || []).length)
+    L.push("🧤 <i>Analyses adaptées :</i> " + g.adaptations.map((x) => esc(x.equipe) + " → " + esc(x.nom)).join(" · "));
   for (const mk of marches) {
     if (mk === "outsider") {
       if ((g.outsiders || []).length) {
@@ -324,13 +619,15 @@ function blocListe(date, jeux) {
 /* ---------- réponse complète ---------- */
 async function traite(text) {
   const d = await index();
+  const gm = String(text || "").trim().match(/^\/?gardiens?\s*(.*)$/i);
+  if (gm) return fluxGardien(gm[1].trim(), d);
   const q = parseRequete(text, d);
   const ds = dates(d);
   if (q.aide) return [AIDE];
   if (q.date === "*") return ["🗓 <b>Jours analysés</b>\n" + ds.join("\n") + "\n(mise à jour : " + esc(d.generatedUtc) + ")"];
   const date = q.date || jourDefaut(d);
   if (!ds.includes(date)) return ["Pas d'analyse pour le " + esc(date) + ". Prochains jours : " + ds.slice(0, 8).join(", ")];
-  const jeuxJour = await jourComplet(date); // index + joueurs classés fusionnés
+  const jeuxJour = await jourAdapte(date, d); // index + joueurs + gardiens corrigés
   const jeux = selection(jeuxJour, q);
   if (q.liste && !q.marches.length) return [blocListe(date, jeuxJour)];
   if (q.podium) return [blocPodium(date, jeuxJour)];
@@ -373,7 +670,7 @@ async function traiteCallback(data, d) {
     return { edit: { texte: titreF, clavier: kbFiltres(e2) } };
   }
   if (cmd === "L" || cmd === "S") {
-    const jeuxJour = await jourComplet(date);
+    const jeuxJour = await jourAdapte(date, d);
     let jeux = jeuxJour;
     if (cmd === "S") {
       const n = parseInt(extra, 10);
@@ -387,7 +684,11 @@ async function traiteCallback(data, d) {
     const jeux = await jourComplet(date);
     return { edit: { texte: "🗓 <b>Matchs du " + esc(date) + "</b> — choisis :", clavier: kbMatchs(etat, jeux) } };
   }
-  if (cmd === "P") return { envoie: [blocPodium(date, await jourComplet(date))], clavier: kbMenu(etat, d) };
+  if (cmd === "Y") {
+    const jeux = await jourAdapte(date, d);
+    return { envoie: [texteGardiens(date, jeux, await overridesJour(date))], clavier: kbMenu(etat, d) };
+  }
+  if (cmd === "P") return { envoie: [blocPodium(date, await jourAdapte(date, d))], clavier: kbMenu(etat, d) };
   if (cmd === "K") return { edit: { texte: "📅 <b>Choisis un jour</b> :", clavier: kbJours(etat, d) } };
   if (cmd === "D") return { edit: { texte: accueilTexte(d, etat), clavier: kbMenu(etat, d) } };
   return {};

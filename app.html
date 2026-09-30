@@ -481,7 +481,7 @@ function effG(game){
     me.goalie={...(me.goalie||{}),name:gk.name,sv:gk.sv,gaa:gk.gaa,confirmed:true};
     g.players.filter(p=>p.abbr===me.abbr).forEach(p=>{
       const ng=p.lambdaSansGardien.g*nouveau;
-      const na=p.lambdaSansGardien.a*nouveau+2*0.30*ng;
+      const na=(p.lambdaSansGardien.a-2*0.30*p.lambda.g)*nouveau+2*0.30*ng;
       p.buteur.lam=ng; p.passeur.lam=na; p.pointeur.lam=ng+na;
       p.buteur.prob=1-Math.exp(-ng); p.passeur.prob=1-Math.exp(-na);
       p.pointeur.prob=1-Math.exp(-(ng+na));

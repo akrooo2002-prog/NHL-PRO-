@@ -141,9 +141,15 @@ const note = (cond, label, extra = "") => {
   // ---------- 1. rendu des onglets ----------
   console.log("\n--- rendu ---");
   const nJoueurs = S.d.games[0].players.length;
+  // les onglets « matchs » et « select » dépendent du jour rendu : seuils
+  // proportionnels au nombre de matchs (un jour d'ouverture à 3 matchs est normal)
+  const tParis = new Date().toLocaleDateString("sv-SE", { timeZone: "Europe/Paris" });
+  const dsAll = [...new Set(S.d.games.map((g) => g.date))].sort();
+  const jourRendu = dsAll.find((x) => x >= tParis) || dsAll[dsAll.length - 1];
+  const nMatchsJour = Math.max(1, S.d.games.filter((g) => g.date === jourRendu).length);
   for (const [name, fn, tag, min] of [["podium", sandbox.rPodium, "DIV", 200],
-                                      ["matchs", sandbox.rMatchs, "DIV", 200],
-                                      ["select", sandbox.rSelect, "DIV", 60],
+                                      ["matchs", sandbox.rMatchs, "DIV", Math.max(80, 30 * nMatchsJour)],
+                                      ["select", sandbox.rSelect, "DIV", Math.max(20, 6 * nMatchsJour)],
                                       ["methode", sandbox.rMethode, "TR", 6]]) {
     const m = new FakeEl("div");
     let err = null;
@@ -208,7 +214,7 @@ const note = (cond, label, extra = "") => {
     .sort((a, b) => a.pointeur.rank - b.pointeur.rank)[0];
   const opp = "home";
   const opts = X.goalieOptions(g0, g0.home);
-  const faible = opts.filter(x => x.sv).sort((a, b) => b.sv - a.sv)[0];
+  const faible = opts.filter(x => x.sv).sort((a, b) => a.sv - b.sv)[0];   // le PLUS FAIBLE sv => probabilité plus haute
   S.ov[g0.id] = { goalies: { [opp]: faible.playerId }, absents: [] };
   const apres = X.effG(g0);
   const q = apres.players.find(p => p.id === cible.id);
