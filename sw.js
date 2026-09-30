@@ -7,8 +7,11 @@
 // Version remplacée à chaque dépôt par GitHub Actions (date du build) :
 // le cache change donc de nom à chaque mise à jour, l'ancien est purgé.
 const VERSION = "__SW_VERSION__";
-const COQUILLE = ["/", "/app.html", "/manifest.webmanifest",
-                  "/icons/icon-192.png", "/icons/icon-512.png"];
+// Chemins RELATIFS au dossier du service worker : le site peut vivre à la
+// racine (Netlify) ou dans un sous-dossier (GitHub Pages /NHL-PRO-/).
+const BASE = new URL(".", self.location).pathname;
+const COQUILLE = ["", "app.html", "manifest.webmanifest",
+                  "icons/icon-192.png", "icons/icon-512.png"].map(p => BASE + p);
 
 self.addEventListener("install", e => {
   e.waitUntil(caches.open(VERSION)
@@ -33,7 +36,7 @@ self.addEventListener("fetch", e => {
       const copie = r.clone();
       caches.open(VERSION).then(c => c.put(req, copie)).catch(() => {});
       return r;
-    }).catch(() => caches.match("/icons/icon-192.png"))));
+    }).catch(() => caches.match(BASE + "icons/icon-192.png"))));
     return;
   }
 
@@ -46,7 +49,7 @@ self.addEventListener("fetch", e => {
         caches.open(VERSION).then(c => c.put(req, copie)).catch(() => {});
       }
       return r;
-    }).catch(() => caches.match(req).then(c => c || caches.match("/app.html"))));
+    }).catch(() => caches.match(req).then(c => c || caches.match(BASE + "app.html"))));
     return;
   }
 
@@ -54,5 +57,5 @@ self.addEventListener("fetch", e => {
   e.respondWith(fetch(req).then(r => {
     if (r && r.ok) caches.open(VERSION).then(c => c.put(req, r.clone())).catch(() => {});
     return r;
-  }).catch(() => caches.match(req).then(c => c || caches.match("/app.html"))));
+  }).catch(() => caches.match(req).then(c => c || caches.match(BASE + "app.html"))));
 });

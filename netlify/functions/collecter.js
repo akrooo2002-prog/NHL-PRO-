@@ -186,10 +186,13 @@ exports.handler = async (event) => {
     for (const s of Object.keys(skatersBy)) {
       if (!goaliesBy[s] || !teamsBy[s]) delete skatersBy[s];
     }
-    const ref = Object.keys(teamsBy)
-      .filter((s) => teamsBy[s].reduce((a, r) => a + (r.gamesPlayed || 0), 0) > 0)
-      .sort()
-      .pop();
+    // Saison de référence = la plus récente avec >= 160 matchs cumulés par
+    // équipe ; en tout début de saison, on garde la précédente (sinon les
+    // classements seraient vides). Même règle que fetch_pronos.py.
+    const jouesPar = (s) => teamsBy[s].reduce((a, r) => a + (r.gamesPlayed || 0), 0);
+    const avecStats = Object.keys(teamsBy).filter((s) => jouesPar(s) > 0).sort();
+    const solides = avecStats.filter((s) => jouesPar(s) >= 160);
+    const ref = (solides.length ? solides : avecStats).pop();
     if (!ref) return j(502, { erreur: "stats de ligue indisponibles" });
 
     // vague 2 : game-logs des 25 meilleurs pointeurs de chaque équipe,

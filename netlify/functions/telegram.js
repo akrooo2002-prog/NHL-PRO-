@@ -7,7 +7,9 @@
 //   TELEGRAM_BOT_TOKEN        — obligatoire, fourni par @BotFather
 //   TELEGRAM_WEBHOOK_SECRET   — recommandé, secret du webhook (anti-abus)
 //   TELEGRAM_OWNER_ID         — optionnel : si défini, seul ce chat est servi
-const DATA = process.env.DATA_URL || "https://nhl-pronos-pro.netlify.app";
+// Les données vivent sur GitHub Pages (gratuit, sans crédits) ; les fonctions
+// restent sur Netlify. DATA_URL permet de pointer ailleurs si besoin.
+const DATA = process.env.DATA_URL || "https://akrooo2002-prog.github.io/NHL-PRO-";
 // En prod, GitHub Actions remplace les trois jetons marqueurs par les secrets
 // du dépôt au build (même principe que le jeton GitHub de refresh.js) ; en
 // local/test, ce sont les variables d'environnement qui priment.

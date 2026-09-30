@@ -13,12 +13,19 @@ name: Rafraîchir les analyses
 
 on:
   workflow_dispatch:
+    inputs:
+      deploy_netlify:
+        description: "Redéployer aussi les fonctions Netlify (15 crédits)"
+        type: boolean
+        default: false
   # schedule:
   #   - cron: "10 7 * * *"     # 07 h 10 UTC
   #   - cron: "10 19 * * *"    # 19 h 10 UTC
 
 permissions:
   contents: read
+  pages: write        # dépôt sur GitHub Pages (gratuit, sans crédits)
+  id-token: write
 
 concurrency:
   group: rafraichissement
@@ -48,6 +55,10 @@ jobs:
           r = sum(1 for g in d["games"] for p in g["players"] if p.get("recrue"))
           assert n >= 20, f"trop peu de matchs : {n}"
           assert a >= 500, f"trop peu d'analyses : {a}"
+          c = sum(1 for g in d["games"]
+                  if (g.get("combos") or {}).get("away", {}).get("duo15"))
+          assert c >= 0.8 * len(d["games"]), (
+              f"combos absents sur trop de matchs : {c}/{n} — saison de référence suspecte")
           print(f"{n} matchs, {a} analyses, dont {r} recrues, généré le {d['generatedUtc']}")
           PY
 
@@ -80,8 +91,8 @@ jobs:
             printf '{"api":"%s"}\n' "${{ vars.WORKER_URL }}" > dist/config.json
             echo "config.json -> ${{ vars.WORKER_URL }}"
           else
-            printf '{"api":"/"}\n' > dist/config.json
-            echo "config.json -> / (functions Netlify)"
+            printf '{"api":"https://nhl-pronos-pro.netlify.app"}\n' > dist/config.json
+            echo "config.json -> https://nhl-pronos-pro.netlify.app (fonctions Netlify)"
           fi
           test -f dist/data/index.json
           test -f dist/app.html
@@ -89,7 +100,16 @@ jobs:
           (cd dist && zip -qr ../site.zip .)
           ls -lh site.zip
 
-      - name: Dépôt sur Netlify (statique + functions)
+      - name: Dépôt sur GitHub Pages (gratuit, illimité, sans crédits)
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+      - name: Publication GitHub Pages
+        uses: actions/deploy-pages@v4
+
+      - name: Dépôt sur Netlify (fonctions UNIQUEMENT — 15 crédits)
+        if: ${{ inputs.deploy_netlify }}
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
@@ -98,12 +118,20 @@ jobs:
             echo "secrets Netlify absents — dépôt ignoré"
             exit 0
           fi
-          # le CLI déploie le statique ET les functions (le simple dépôt zip
-          # ignore les functions et les supprimerait)
-          cd dist
+          # Netlify ne sert plus le site (GitHub Pages le fait gratuitement) :
+          # on n'y dépose que les fonctions et leurs redirections, et seulement
+          # quand leur code a changé (chaque dépôt Netlify coûte 15 crédits).
+          mkdir -p netlify-min
+          printf '%s\n' \
+            "/telegram /.netlify/functions/telegram 200" \
+            "/collecter /.netlify/functions/collecter 200" \
+            "/live /.netlify/functions/live 200" \
+            "/refresh /.netlify/functions/refresh 200" \
+            "/healthz /.netlify/functions/healthz 200" > netlify-min/_redirects
+          cd netlify-min
           npx -y netlify-cli@latest deploy --prod \
             --auth="$NETLIFY_AUTH_TOKEN" --site="$NETLIFY_SITE_ID" \
-            --dir=. --functions=netlify/functions
+            --dir=. --functions=../netlify/functions
 
       - name: Résumé
         if: always()

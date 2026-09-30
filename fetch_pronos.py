@@ -247,7 +247,13 @@ def collecte(games, log=print, saisons=None, workers=None, box=None, logs_n=None
             log(f"     {s}: {len(skaters[s])} patineurs, {len(goalies[s])} gardiens, {gp} matchs joués")
 
     log("4/6 game-logs (forme, TGL, absences)…")
-    ref = max(s for s in skaters if sum(r.get("gamesPlayed", 0) for r in teams_stats.get(s, [])) > 0)
+    # Saison de référence = la plus récente avec un échantillon SOLIDE
+    # (>= 160 matchs cumulés par équipe, soit ~5 par équipe). En tout début de
+    # saison, la nouvelle saison n'a quasi aucune statistique : basculer dessus
+    # viderait les classements — on garde alors la saison précédente.
+    joues = {s: sum(r.get("gamesPlayed", 0) for r in teams_stats.get(s, [])) for s in skaters}
+    solides = [s for s in joues if joues[s] >= 160]
+    ref = max(solides) if solides else max(s for s in joues if joues[s] > 0)
     targets = []
     for t in teams:
         r = rosters.get(t, {})
