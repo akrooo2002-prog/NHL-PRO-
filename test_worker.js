@@ -16,6 +16,11 @@ global.fetch = async (url, opts) => {
     if (!fs.existsSync(f)) return { ok: false, status: 404 };
     return { ok: true, status: 200, json: async () => JSON.parse(fs.readFileSync(f, "utf8")) };
   }
+  if (url.includes("dailyfaceoff.com")) {
+    dfoHits++;
+    if (!global.DFO_FIXTURE) return { ok: false, status: 404 };
+    return { ok: true, status: 200, text: async () => global.DFO_FIXTURE };
+  }
   const mt = url.match(/api\.telegram\.org\/bot[^/]+\/(\w+)/);
   if (mt) {
     apis.push({ methode: mt[1], body: opts && opts.body ? JSON.parse(opts.body) : null });
@@ -26,10 +31,12 @@ global.fetch = async (url, opts) => {
 
 const kvStore = new Map();
 const GARDIENS = {
-  async list(o) { const pfx = (o && o.prefix) || ""; return { keys: [...kvStore.keys()].filter((k) => k.startsWith(pfx)).map((k) => ({ name: k, metadata: kvStore.get(k) })) }; },
-  async put(k, v, o) { kvStore.set(k, (o && o.metadata) || {}); },
+  async list(o) { const pfx = (o && o.prefix) || ""; return { keys: [...kvStore.keys()].filter((k) => k.startsWith(pfx)).map((k) => ({ name: k, metadata: kvStore.get(k).metadata })) }; },
+  async put(k, v, o) { kvStore.set(k, { value: v, metadata: (o && o.metadata) || null }); },
+  async get(k, type) { const e = kvStore.get(k); if (!e) return null; return type === "json" ? JSON.parse(e.value) : e.value; },
   async delete(k) { kvStore.delete(k); },
 };
+let dfoHits = 0;
 const ENV = { TELEGRAM_BOT_TOKEN: "TEST-TOKEN", TELEGRAM_WEBHOOK_SECRET: "TEST-SECRET", TELEGRAM_OWNER_ID: "4242", GARDIENS };
 let n = 0, echecs = 0;
 function ok(cond, msg) { n++; if (!cond) { echecs++; console.log("ECHEC : " + msg); } else console.log("ok — " + msg); }
@@ -222,6 +229,57 @@ let WORKER;
   const lance = await clique("L:13g@0");
   ok(!jeu2p || lance.textes.includes("OUTSIDER 2+ POINTS"),
     "mini-app : 🚀 affiche le bloc outsider 2+ points");
+
+  // ---------- Daily Faceoff : confirmations en temps réel dans le bot ----------
+  const gjeu = jeuxDefaut.find((g) => g.ctx && (INDEX.goalieList[g.home] || []).length
+    && (INDEX.goalieList[g.away] || []).length && (INDEX.teams[g.home] || {}).nameEn);
+  const gkH = INDEX.goalieList[gjeu.home][0], gkA = INDEX.goalieList[gjeu.away][0];
+  const nG = jeuxDefaut.indexOf(gjeu) + 1;
+  global.DFO_FIXTURE = '<script id="__NEXT_DATA__" type="application/json">' + JSON.stringify({
+    props: { pageProps: { data: [{
+      date: defaut,
+      awayTeamName: (INDEX.teams[gjeu.away] || {}).nameEn,
+      homeTeamName: (INDEX.teams[gjeu.home] || {}).nameEn,
+      awayGoalieName: gkA.name, homeGoalieName: gkH.name,
+      awayNewsStrengthName: "Confirmed", homeNewsStrengthName: "Confirmed",
+    }] } },
+  }) + "</scr" + "ipt>";
+  const avant = dfoHits;
+  const an1 = await dire("gardien");
+  ok(dfoHits === avant + 1 && /confirmé/.test(an1.textes) && an1.textes.includes("Daily Faceoff")
+    && an1.textes.includes(gkH.name.split(" ").slice(-1)[0]),
+    "DFO : l'annonce capte les confirmations EN DIRECT (" + gjeu.away + " @ " + gjeu.home + ")");
+  const an2 = await dire("gardien");
+  ok(dfoHits === avant + 1, "DFO : cache 20 min (pas de relecture à chaque demande)");
+
+  // le gardien away confirmé = gkA → les joueurs de HOME sont recalculés (EXACT)
+  const fNA = Math.max(0.5, Math.min(1.8, (1 - gkA.sv) / (1 - svMoy)));
+  const rowsH = joueursDe(gjeu.id).filter((p) => p.abbr === gjeu.home && p.buteur).map((p) => {
+    if (!p.lambdaSansGardien || p.recrue)
+      return { p, prob: p.buteur.prob, score: p.buteur.score, conf: p.buteur.confidence };
+    const ng = p.lambdaSansGardien.g * fNA;
+    const prob = Math.round((1 - Math.exp(-ng)) * 10000) / 10000;
+    const score = jr1(100 * prob, 1);
+    return { p, prob, score, conf: score > 0 ? jr1(confT(prob, p.gp, p.flags || [], !!gjeu.preseason), 1) : 0 };
+  });
+  rowsH.sort((a, b) => b.conf - a.conf || b.score - a.score || (a.p.name < b.p.name ? -1 : 1));
+  const top3H = rowsH.filter((r) => r.score > 0).slice(0, 3);
+  const bb = await dire("buteur match " + nG);
+  ok(top3H.length > 0 && bb.textes.includes("🧤")
+    && top3H.every((r) => bb.textes.includes(r.p.name) && bb.textes.includes(pctT(r.prob))),
+    "DFO : probabilités recalculées EXACTES avec le gardien confirmé — "
+    + top3H.map((r) => r.p.name + " " + pctT(r.prob)).join(" | "));
+
+  const altH = (INDEX.goalieList[gjeu.home] || []).find((x) => x.playerId !== gkH.playerId && x.sv);
+  if (altH) {
+    await dire("gardien " + gjeu.home + " " + altH.name);
+    const an3 = await dire("gardien");
+    ok(an3.textes.includes("Corrigés") && an3.textes.includes(altH.name.split(" ").slice(-1)[0]),
+      "DFO : ta correction manuelle a priorité sur la source");
+    await dire("gardien annule " + gjeu.home);
+  } else {
+    ok(true, "DFO : pas de gardien alternatif pour le test de priorité");
+  }
 
   console.log(echecs === 0 ? "RESULTAT WORKER CLOUDFLARE : TOUT EST OK (" + n + " vérifications)"
                            : "RESULTAT WORKER CLOUDFLARE : " + echecs + " ECHECS / " + n);

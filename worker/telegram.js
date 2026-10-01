@@ -238,6 +238,61 @@ const f2fr = (x) => (x === null || x === undefined ? "—" : Number(x).toFixed(2
 const pcfr = (x, dd) => (x === null || x === undefined ? "—"
   : (x * 100).toFixed(dd === undefined ? 1 : dd).replace(".", ",") + " %");
 
+// ---- gardiens CONFIRMÉS (Daily Faceoff) : lus en direct, cache KV 20 min ----
+// Le bot ne dépend plus du pipeline : à chaque demande, si le cache a plus de
+// 20 minutes, on relit la source. Seuls les statuts « Confirmed » sont retenus.
+const DFO_URL = "https://www.dailyfaceoff.com/starting-goalies";
+const DFO_TTL = 20 * 60 * 1000;
+async function dfoConfirms(date, d) {
+  const cle = "dfo:" + date;
+  let cache = null;
+  if (ENV.GARDIENS) { try { cache = await ENV.GARDIENS.get(cle, "json"); } catch (e) { /* tant pis */ } }
+  if (cache && Date.now() - (cache.ts || 0) < DFO_TTL) return cache.ov || {};
+  let ov = (cache && cache.ov) || {};           // source injoignable → dernier état connu
+  try {
+    const r = await fetch(DFO_URL, { headers: {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+      "Accept": "text/html" } });
+    if (!r.ok) return ov;
+    const html = await r.text();
+    const m = html.match(/<script id="__NEXT_DATA__" type="application\/json"[^>]*>([\s\S]*?)<\/script>/);
+    if (!m) return ov;
+    const rows = (((JSON.parse(m[1]).props || {}).pageProps) || {}).data || [];
+    const parNom = {};
+    Object.keys(d.teams || {}).forEach((ab) => { parNom[na((d.teams[ab] || {}).nameEn)] = ab; });
+    const out = {};
+    rows.forEach((row) => {
+      if (row.date !== date) return;
+      [["awayTeamName", "awayGoalieName", "awayNewsStrengthName", "awayGoalieSavePercentage"],
+       ["homeTeamName", "homeGoalieName", "homeNewsStrengthName", "homeGoalieSavePercentage"]]
+        .forEach(([tEq, tGk, tSt, tSv]) => {
+          if ((row[tSt] || "") !== "Confirmed") return;
+          const ab = parNom[na(row[tEq])];
+          if (!ab) return;
+          const nom = String(row[tGk] || "");
+          const cleN = na(nom), nomFamille = na(nom.split(" ").slice(-1)[0]);
+          const gk = (d.goalieList[ab] || []).find((g) => na(g.name) === cleN
+            || na(String(g.name).split(" ").slice(-1)[0]) === nomFamille);
+          if (!gk) return;
+          let sv = gk.sv;
+          if (!sv && row[tSv]) {                // pas de stats de référence → % de la source
+            let x = parseFloat(row[tSv]);
+            if (x > 1) x = x / 100;
+            if (x > 0.5 && x < 1) sv = x;
+          }
+          if (!sv) return;
+          out[ab] = { name: gk.name, playerId: gk.playerId, sv };
+        });
+    });
+    ov = out;
+    if (ENV.GARDIENS) {
+      try { await ENV.GARDIENS.put(cle, JSON.stringify({ ts: Date.now(), ov }), { expirationTtl: 172800 }); }
+      catch (e) { /* tant pis */ }
+    }
+  } catch (e) { /* source injoignable : on garde le cache */ }
+  return ov;
+}
+
 // ---- gardiens corrigés à la main : stockage Cloudflare KV (vie : 3 jours) ----
 async function overridesJour(date) {
   if (!ENV.GARDIENS) return {};
@@ -459,13 +514,15 @@ function resolveTeam(txt, d) {
 async function fluxGardien(rest, d) {
   const date = jourDefaut(d);
   const jeux = await jourComplet(date);
-  const ov = await overridesJour(date);
-  if (!rest) return [texteGardiens(date, jeux, ov)];
+  const ovManuel = await overridesJour(date);
+  const ov = Object.assign({}, await dfoConfirms(date, d), ovManuel);
+  if (Object.keys(ov).length) jeux.forEach((g) => adapteMatch(g, ov, d));
+  if (!rest) return [texteGardiens(date, jeux, ovManuel)];
   const ann = rest.match(/^(annule|annuler|reset|efface|effacer|supprime|supprimer|retire|retirer)\s*(.*)$/i);
   if (ann) {
     const team = resolveTeam(ann[2].trim(), d);
     if (!team) return ["Donne l'équipe : « gardien annule VAN »."];
-    if (!ov[team]) return ["Aucun gardien corrigé pour " + esc(team) + "."];
+    if (!ovManuel[team]) return ["Aucun gardien corrigé pour " + esc(team) + "."];
     await retireGardien(date, team);
     return ["↩️ <b>" + esc(team) + "</b> : retour à l'annonce officielle."];
   }
@@ -496,7 +553,9 @@ async function fluxGardien(rest, d) {
   await poseGardien(date, tm, gk);
   const ctxOpp = jeu.away === tm ? jeu.ctx.home : jeu.ctx.away;
   const fOld = ctxOpp.goalieF;
-  adapteMatch(jeu, { [tm]: { name: gk.name, playerId: gk.playerId, sv: gk.sv } }, d);
+  const ov2 = Object.assign({}, ov);
+  ov2[tm] = { name: gk.name, playerId: gk.playerId, sv: gk.sv };
+  adapteMatch(jeu, ov2, d);
   const ad = (jeu.adaptations || [])[0] || {};
   const head = "✅ <b>Gardien pris en compte : " + esc(gk.name) + " (" + esc(tm) + ")</b> — " + pcfr(gk.sv)
     + "\nFacteur gardien ×" + f1fr(fOld) + " → ×" + f1fr(ad.fNouv) + " · toutes tes analyses du "
@@ -505,7 +564,8 @@ async function fluxGardien(rest, d) {
 }
 async function jourAdapte(date, d) {
   const jeux = await jourComplet(date);
-  const ov = await overridesJour(date);
+  // confirmations Daily Faceoff + corrections manuelles (le manuel a priorité)
+  const ov = Object.assign({}, await dfoConfirms(date, d), await overridesJour(date));
   if (Object.keys(ov).length) jeux.forEach((g) => adapteMatch(g, ov, d));
   return jeux;
 }
@@ -516,8 +576,16 @@ function aujourdhui() {
   return new Date().toLocaleDateString("sv-SE", { timeZone: "Europe/Paris" });
 }
 function jourDefaut(d) {
-  const ds = dates(d), t = aujourdhui();
-  return ds.find((x) => x >= t) || ds[ds.length - 1];
+  const ds = dates(d);
+  const u = new Date(), tU = u.toISOString().slice(0, 10);
+  // Les matchs se jouent la NUIT américaine : entre minuit et 07h00 UTC, le
+  // jour qui compte reste la veille (matchs tardifs encore en cours), pas la
+  // date du calendrier parisien — sinon les confirmations DFO du soir sont ratées.
+  if (u.getUTCHours() < 7) {
+    const veille = ds.filter((x) => x < tU).pop();
+    if (veille) return veille;
+  }
+  return ds.find((x) => x >= tU) || ds[ds.length - 1];
 }
 
 /* ---------- analyse de la demande ---------- */
@@ -834,16 +902,36 @@ async function envoie(chatId, morceaux, clavier) {
 }
 
 /* ---------- handler Cloudflare Worker ---------- */
+// Le site est rafraîchi au plus tard 15 min après ton premier message, sans
+// dépendre d'un cron extérieur (les crons GitHub/CF sautent des passages).
+async function majSiPerime(ENV) {
+  try {
+    const marqueur = await ENV.GARDIENS.get("maj:site");
+    if (marqueur && Date.now() - Number(marqueur) < 15 * 60000) return;
+    await ENV.GARDIENS.put("maj:site", String(Date.now()));
+    if (!ENV.GITHUB_PAT) return;
+    await fetch("https://api.github.com/repos/akrooo2002-prog/NHL-PRO-/actions/workflows/refresh.yml/dispatches", {
+      method: "POST",
+      headers: { "Authorization": "Bearer " + ENV.GITHUB_PAT,
+                 "Accept": "application/vnd.github+json", "User-Agent": "nhl-bot-usage" },
+      body: JSON.stringify({ ref: "main", inputs: { deploy_netlify: false } }),
+    });
+  } catch (e) { /* tant pis : le cron GitHub reste en secours */ }
+}
+
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     ENV = env || {};
-    if (request.method === "GET") return j(200, { ok: true, bot: !!TOKEN(), donnees: DATA });
+    if (request.method === "GET") {
+      return j(200, { ok: true, bot: !!TOKEN(), donnees: DATA });
+    }
     if (request.method !== "POST") return j(405, { ok: false });
     if (!TOKEN()) return j(200, { ok: false, erreur: "TELEGRAM_BOT_TOKEN non configuré" });
     const sec = request.headers.get("x-telegram-bot-api-secret-token");
     if (SECRET() && sec !== SECRET()) return j(401, { ok: false });
     let up;
     try { up = JSON.parse((await request.text()) || "{}"); } catch (e) { return j(200, { ok: false }); }
+    if (ctx && ctx.waitUntil) ctx.waitUntil(majSiPerime(ENV)); // rafraîchit le site en arrière-plan
 
     // ---- clic sur un bouton (mini-app) ----
     const cbq = up.callback_query;
@@ -896,5 +984,21 @@ export default {
       try { await envoie(msg.chat.id, ["❌ Erreur : " + esc(String((e && e.message) || e))]); } catch (e2) { /* tant pis */ }
       return j(200, { ok: false, erreur: String((e && e.message) || e) });
     }
+  },
+
+  // Cron Cloudflare (fiable, lui) : régénère le site toutes les 30 min — le cron
+  // de GitHub saute des passages aux heures de pointe, les confirmations de
+  // gardiens arrivaient donc en retard sur le site.
+  async scheduled(event, env) {
+    ENV = env || {};
+    if (!ENV.GITHUB_PAT) return;
+    try {
+      await fetch("https://api.github.com/repos/akrooo2002-prog/NHL-PRO-/actions/workflows/refresh.yml/dispatches", {
+        method: "POST",
+        headers: { "Authorization": "Bearer " + ENV.GITHUB_PAT,
+                   "Accept": "application/vnd.github+json", "User-Agent": "nhl-bot-cron" },
+        body: JSON.stringify({ ref: "main", inputs: { deploy_netlify: false } }),
+      });
+    } catch (e) { /* tant pis : le cron GitHub reste en secours */ }
   },
 };
