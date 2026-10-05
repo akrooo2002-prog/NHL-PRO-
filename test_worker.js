@@ -16,6 +16,15 @@ global.fetch = async (url, opts) => {
     if (!fs.existsSync(f)) return { ok: false, status: 404 };
     return { ok: true, status: 200, json: async () => JSON.parse(fs.readFileSync(f, "utf8")) };
   }
+  if (url.includes("api-web.nhle.com")) {
+    if (!global.NHL) return { ok: false, status: 404 };
+    const mb = url.match(/gamecenter\/(\d+)\/boxscore/);
+    if (mb) {
+      const f = global.NHL.boxscores[mb[1]];
+      return f ? { ok: true, status: 200, json: async () => f } : { ok: false, status: 404 };
+    }
+    return { ok: false, status: 404 };
+  }
   if (url.includes("dailyfaceoff.com")) {
     dfoHits++;
     if (!global.DFO_FIXTURE) return { ok: false, status: 404 };
@@ -78,8 +87,12 @@ let WORKER;
   ok(st.textes.includes("NHL Pronos") && !!st.clavier && st.clavier.inline_keyboard.length >= 3, "/start → accueil + mini-app");
 
   const ds = [...new Set(INDEX.games.map((x) => x.date))].sort();
-  const t0 = new Date().toLocaleDateString("sv-SE", { timeZone: "Europe/Paris" });
-  const defaut = ds.find((x) => x >= t0) || ds[ds.length - 1];
+  // même règle que jourDefaut du worker : avant 07h UTC, on reste sur la veille
+  // (matchs américains encore en cours), sinon premier jour >= aujourd'hui UTC
+  const u0 = new Date(), tU0 = u0.toISOString().slice(0, 10);
+  const veille0 = ds.filter((x) => x < tU0).pop();
+  const defaut = (u0.getUTCHours() < 7 && veille0) ? veille0
+    : (ds.find((x) => x >= tU0) || ds[ds.length - 1]);
   const jeuTest = INDEX.games.filter((x) => x.date === defaut && (x.outsiders || []).length)[0] || INDEX.games.filter((x) => x.date === defaut)[0];
   const eq = jeuTest.away;
 
@@ -280,6 +293,40 @@ let WORKER;
   } else {
     ok(true, "DFO : pas de gardien alternatif pour le test de priorité");
   }
+
+  // ---------- bilan : pronos enregistrées → résultats → stats ----------
+  const boxscores = {};
+  jeuxDefaut.forEach((g) => {
+    const vus = new Set(), fw = [];
+    const ajouteJ = (id) => { if (!vus.has(id)) { vus.add(id); fw.push({ playerId: id, name: { default: "X" }, goals: 3, assists: 3, points: 6 }); } };
+    joueursDe(g.id).forEach((p) => ajouteJ(p.id));
+    ["away", "home"].forEach((side) => ["double", "triple", "duo15", "trio15"].forEach((t) => {
+      const cb = ((g.combos || {})[side] || {})[t];
+      ((cb || {}).members || []).forEach((m) => ajouteJ(m.id));
+    }));
+    boxscores[String(g.id)] = { gameState: "OFF",
+      playerByGameStats: { awayTeam: { forwards: fw, defense: [] },
+                           homeTeam: { forwards: [], defense: [] } } };
+  });
+  global.NHL = { boxscores };
+  const bb1 = await dire("bilan");
+  const snap = JSON.parse(kvStore.get("prono:" + defaut).value);
+  ok(snap && snap.picks.length >= jeuxDefaut.length * 7,
+    "bilan : pronos enregistrées (" + (snap ? snap.picks.length : 0) + " picks — 7 marchés + outsiders + combos)");
+  const res = JSON.parse(kvStore.get("result:" + defaut).value);
+  ok(res && res.n === snap.picks.length && res.h === res.n
+    && bb1.morceaux === 1 && bb1.textes.includes("100 %")
+    && bb1.textes.includes("Par marché") && bb1.textes.includes("Buteur 1+"),
+    "bilan : vérifié sur les résultats réels (100 %) — 1 seul message Telegram non vide");
+  ok(bb1.textes.includes("trop prudent") || bb1.textes.includes("sous-évalué"),
+    "bilan : verdict de calibration (annoncé vs réalisé)");
+  const hier = ds.filter((x) => x < defaut).pop();   // jour précédent (forcemment différent de defaut)
+  kvStore.set("prono:" + hier, { value: JSON.stringify({ ts: Date.now(), date: hier,
+    picks: [{ gid: 999, mk: "buteur", name: "Test", id: 1, prob: 0.5, conf: 50, pal: 3, val: "PROBABLE" }] }),
+    metadata: null });
+  global.NHL.boxscores["999"] = { gameState: "LIVE" };
+  await dire("bilan");
+  ok(!kvStore.get("result:" + hier), "bilan : match pas fini → pas encore vérifié (réessaiera)");
 
   console.log(echecs === 0 ? "RESULTAT WORKER CLOUDFLARE : TOUT EST OK (" + n + " vérifications)"
                            : "RESULTAT WORKER CLOUDFLARE : " + echecs + " ECHECS / " + n);

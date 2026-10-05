@@ -77,6 +77,7 @@ const AIDE =
   "/top — 🌟 le meilleur du jour, filtre par filtre\n" +
   "/demain — analyse de demain\n" +
   "/gardien — gardiens probables + corriger un partant\n" +
+  "/bilan — 📊 mes résultats : le bot vérifie ses pronos\n" +
   "/dates — jours analysés\n" +
   "/aide — cette aide\n\n" +
   "<b>Texte libre</b> — combine comme tu veux :\n" +
@@ -125,7 +126,7 @@ function accueilTexte(d, etat) {
     + "Filtres actifs : " + st.codes.map((c) => MK_LIB[c]).join(", ") + "\n\n"
     + "Clique sur ⚙️ pour cocher tes marchés, 🌟 pour le top du jour.\n"
     + "Tu peux aussi m'écrire : « buteur outsider FLA »\n"
-    + "ou « gardien VAN Demko » pour adapter les analyses à un gardien.";
+    + "ou « gardien VAN Demko » pour adapter les analyses à un gardien.\n📊 /bilan : ma réussite, marché par marché.";
 }
 function kbMenu(etat, d) {
   const ds = dates(d), st = decodeEtat(etat);
@@ -134,7 +135,7 @@ function kbMenu(etat, d) {
     [btn("⚙️ Filtres", "F:" + etat), btn("🗓 Matchs", "G:" + etat)],
     [btn("🏆 Podium", "P:" + etat), btn("🌟 Top du jour", "O:" + etat)],
     [btn("🥅 Gardiens", "Y:" + etat), btn("📅 " + date.slice(5).replace("-", "/"), "K:" + etat)],
-    [btn("❓ Aide", "A")],
+    [btn("📊 Bilan", "B:" + etat), btn("❓ Aide", "A")],
   ] };
 }
 function kbFiltres(etat) {
@@ -747,6 +748,8 @@ async function traite(text) {
   const d = await index();
   const gm = String(text || "").trim().match(/^\/?gardiens?\s*(.*)$/i);
   if (gm) return fluxGardien(gm[1].trim(), d);
+  if (/^\/?(bilan|stats|efficacite|efficacité|reussite|réussite|resultats|résultats)$/i.test(String(text || "").trim()))
+    return fluxBilan(d);
   const q = parseRequete(text, d);
   const ds = dates(d);
   if (q.aide) return [AIDE];
@@ -830,6 +833,7 @@ async function traiteCallback(data, d) {
   const date = ds[Math.min(jourIdx, ds.length - 1)] || ds[ds.length - 1];
   const titreF = "⚙️ <b>Filtres</b> — 📅 " + esc(date) + "\nCoche tes marchés puis lance :";
   if (cmd === "A") return { envoie: [AIDE], clavier: kbMenu(etat, d) };
+  if (cmd === "B") return { envoie: await fluxBilan(d), clavier: kbMenu(etat, d) };
   if (cmd === "M") return { edit: { texte: accueilTexte(d, etat), clavier: kbMenu(etat, d) } };
   if (cmd === "F") return { edit: { texte: titreF, clavier: kbFiltres(etat) } };
   if (cmd === "T") {
@@ -916,7 +920,177 @@ async function majSiPerime(ENV) {
                  "Accept": "application/vnd.github+json", "User-Agent": "nhl-bot-usage" },
       body: JSON.stringify({ ref: "main", inputs: { deploy_netlify: false } }),
     });
+    await majBilan();                                   // photo des pronos + vérification des résultats
   } catch (e) { /* tant pis : le cron GitHub reste en secours */ }
+}
+
+/* ---------- bilan : le bot enregistre ses pronos, vérifie les matchs, mesure ---------- */
+const NHL_API = "https://api-web.nhle.com/v1";
+const MK_BILAN = { buteur: "Buteur 1+", passeur: "Passeur 1+", pointeur: "Pointeur 1+",
+  doubleButeur: "2+ buts", tripleButeur: "3+ buts", doublePointeur: "2+ points",
+  triplePointeur: "3+ points", outsiderButeur: "Out. buteur", outsiderPointeur: "Out. pointeur",
+  outsiderDoubleButeur: "Out. 2+ buts", outsiderTripleButeur: "Out. 3+ buts",
+  outsiderDoublePointeur: "Out. 2+ points", outsiderTriplePointeur: "Out. 3+ points",
+  duo: "Duo (1 buteur)", trio: "Trio (1 buteur)", duo15: "Duo 2+ buts", trio15: "Trio 2+ buts" };
+const TTL_AN = 31536000;
+
+// la photo exacte de ce que le bot recommande pour un jour (top 1 de chaque marché)
+function snapshotPicksDe(jeux) {
+  const picks = [];
+  jeux.forEach((g) => {
+    MK_SIMPLE.forEach((mk) => {
+      const rows = (g.players || []).filter((p) => p[mk] && p[mk].rank && p[mk].score > 0);
+      if (!rows.length) return;
+      rows.sort((a, b) => a[mk].rank - b[mk].rank);
+      const p = rows[0];
+      picks.push({ gid: g.id, mk, name: p.name, id: p.id, ab: p.abbr,
+        prob: p[mk].prob || 0, conf: p[mk].confidence || 0, pal: p[mk].palier || 0,
+        val: p[mk].valeur || "PROBABLE" });
+    });
+    Object.keys(OUTS_CHAMP).forEach((k) => {
+      if (k === "outsider") return;
+      const o = (g[OUTS_CHAMP[k]] || [])[0];
+      if (!o) return;
+      picks.push({ gid: g.id, mk: k, name: o.name, id: o.id, ab: o.abbr,
+        prob: o.prob || 0, conf: o.confidence || 0, pal: o.palier || 0,
+        val: o.valeur || "PROBABLE" });
+    });
+    [["duo", "double"], ["trio", "triple"], ["duo15", "duo15"], ["trio15", "trio15"]].forEach(([t, cle]) => {
+      ["away", "home"].forEach((side) => {
+        const cb = ((g.combos || {})[side] || {})[cle];
+        if (!cb || !cb.members || !cb.members.length) return;
+        picks.push({ gid: g.id, mk: t, name: cb.members.map((x) => x.name).join(" + "), id: 0,
+          members: cb.members.map((x) => ({ id: x.id, name: x.name })),
+          prob: cb.prob || 0, conf: cb.confidence || 0, pal: cb.palier || 0,
+          val: cb.valeur || "PROBABLE" });
+      });
+    });
+  });
+  return picks;
+}
+
+async function enregistrePronos(date, d) {
+  const cle = "prono:" + date;
+  const vieux = await ENV.GARDIENS.get(cle, "json").catch(() => null);
+  const jeux = await jourAdapte(date, d);
+  if (!jeux.length) return;
+  if (vieux && vieux.picks && vieux.picks.length) {
+    const premier = jeux.map((g) => String(g.startUtc || "9999")).sort()[0];
+    if (new Date(premier) <= new Date()) return;        // 1re mise au jeu → prono figée
+  }
+  const picks = snapshotPicksDe(jeux);
+  if (picks.length)
+    await ENV.GARDIENS.put(cle, JSON.stringify({ ts: Date.now(), date, picks }),
+      { expirationTtl: TTL_AN }).catch(() => {});
+}
+
+function hitPick(p, stats) {
+  if (p.members && p.members.length) {
+    const buts = p.members.reduce((som, m) => som + ((stats[m.id] || {}).g || 0), 0);
+    return (p.mk === "duo" || p.mk === "trio") ? buts >= 1 : buts >= 2;
+  }
+  const st = stats[p.id] || { g: 0, a: 0, p: 0 };
+  switch (p.mk) {
+    case "buteur": case "outsiderButeur": return st.g >= 1;
+    case "passeur": return st.a >= 1;
+    case "pointeur": case "outsiderPointeur": return st.p >= 1;
+    case "doubleButeur": case "outsiderDoubleButeur": return st.g >= 2;
+    case "tripleButeur": case "outsiderTripleButeur": return st.g >= 3;
+    case "doublePointeur": case "outsiderDoublePointeur": return st.p >= 2;
+    case "triplePointeur": case "outsiderTriplePointeur": return st.p >= 3;
+    default: return false;
+  }
+}
+
+async function verifieJour(date) {
+  const snap = await ENV.GARDIENS.get("prono:" + date, "json").catch(() => null);
+  if (!snap || !snap.picks || !snap.picks.length) return 0;
+  if (await ENV.GARDIENS.get("result:" + date).catch(() => null)) return 0;
+  const gids = [...new Set(snap.picks.map((p) => String(p.gid)))];
+  const stats = {};
+  for (const gid of gids) {
+    let b;
+    try {
+      const r = await fetch(NHL_API + "/gamecenter/" + gid + "/boxscore",
+        { headers: { "User-Agent": "nhl-pronos-bot" } });
+      if (!r.ok) return 0;
+      b = await r.json();
+    } catch (e) { return 0; }
+    if (!b || b.gameState !== "OFF") return 0;          // pas fini → on retentera plus tard
+    const pt = b.playerByGameStats || {};
+    ["awayTeam", "homeTeam"].forEach((cote) => ["forwards", "defense"].forEach((ligne) => {
+      (((pt[cote] || {})[ligne]) || []).forEach((j) => {
+        stats[j.playerId] = { g: j.goals || 0, a: j.assists || 0, p: j.points || 0 };
+      });
+    }));
+  }
+  const picks = snap.picks.map((p) => Object.assign({}, p, { hit: hitPick(p, stats) }));
+  const res = { ts: Date.now(), date, n: picks.length,
+    h: picks.filter((x) => x.hit).length, picks };
+  await ENV.GARDIENS.put("result:" + date, JSON.stringify(res),
+    { expirationTtl: TTL_AN }).catch(() => {});
+  await fusionneAgg(picks);
+  return picks.length;
+}
+
+async function fusionneAgg(picks) {
+  const agg = (await ENV.GARDIENS.get("bilan:agg", "json").catch(() => null))
+    || { n: 0, h: 0, sp: 0, mk: {}, val: {}, pal: {} };
+  const ajoute = (o, p) => {
+    o.n = (o.n || 0) + 1; o.h = (o.h || 0) + (p.hit ? 1 : 0); o.sp = (o.sp || 0) + (p.prob || 0);
+  };
+  picks.forEach((p) => {
+    ajoute(agg, p);
+    [agg.mk, agg.val, agg.pal].forEach((zone, i) => {
+      const cle = i === 0 ? p.mk : (i === 1 ? (p.val || "PROBABLE") : String(p.pal || 0));
+      if (!zone[cle]) zone[cle] = { n: 0, h: 0, sp: 0 };
+      ajoute(zone[cle], p);
+    });
+  });
+  await ENV.GARDIENS.put("bilan:agg", JSON.stringify(agg),
+    { expirationTtl: TTL_AN }).catch(() => {});
+}
+
+// appelé à chaque message (throttle 6 h) : photo des pronos du jour + vérification des 8 derniers jours
+async function majBilan(d, force) {
+  if (!force) {
+    const scan = await ENV.GARDIENS.get("bilan:scan").catch(() => null);
+    if (scan && Date.now() - Number(scan) < 6 * 3600000) return;
+  }
+  await ENV.GARDIENS.put("bilan:scan", String(Date.now())).catch(() => {});
+  if (!d) d = await index();
+  try { await enregistrePronos(jourDefaut(d), d); } catch (e) { /* tant pis */ }
+  const auj = new Date();
+  for (let i = 1; i <= 8; i++)
+    try { await verifieJour(new Date(auj.getTime() - i * 86400000).toISOString().slice(0, 10)); } catch (e) { /* tant pis */ }
+  try { await verifieJour(aujourdhui()); } catch (e) { /* tant pis */ }   // matchs précoces (fuseau)
+}
+
+function ligneBilan(lab, o) {
+  if (!o || !o.n) return null;
+  const r = Math.round(100 * o.h / o.n), a = Math.round(100 * o.sp / o.n);
+  let flag = "";
+  if (o.n >= 15 && Math.abs(r - a) >= 10) flag = r < a ? " ⚠️ surévalué" : " 💎 sous-évalué";
+  return lab + " : " + r + " % (annonce " + a + ") — " + o.n + " picks" + flag;
+}
+async function fluxBilan(d) {
+  try { await majBilan(d, true); } catch (e) { /* tant pis */ }
+  const agg = await ENV.GARDIENS.get("bilan:agg", "json").catch(() => null);
+  if (!agg || !agg.n)
+    return ["📊 <b>BILAN</b>\nRien de vérifié pour l'instant : j'enregistre les pronos chaque jour et je compare aux résultats après les matchs. Repasse après les premiers matchs !"];
+  const r = Math.round(100 * agg.h / agg.n), a = Math.round(100 * agg.sp / agg.n);
+  const verdict = Math.abs(r - a) < 5 ? "→ ✅ bien calibré" : (r < a ? "→ ⚠️ trop confiant" : "→ 💎 trop prudent");
+  const L = ["📊 <b>BILAN DU BOT</b> — " + agg.n + " pronos vérifiées",
+    "🎯 Réussite : <b>" + r + " %</b> (" + agg.h + "/" + agg.n + ") · probabilité annoncée : " + a + " % " + verdict];
+  const bloc = (titre, lignes) => { if (lignes.length) { L.push("", "<b>" + titre + "</b>"); L.push(...lignes.map((x) => "• " + x)); } };
+  bloc("Par marché", Object.keys(agg.mk).sort((x, y) => agg.mk[y].n - agg.mk[x].n)
+    .map((k) => ligneBilan(MK_BILAN[k] || k, agg.mk[k])).filter(Boolean));
+  bloc("Par étiquette", [["SUR", "✅ SÛR"], ["PROBABLE", "PROBABLE"], ["VALUE", "🔥 VALEUR"]]
+    .map(([v, lab]) => ligneBilan(lab, agg.val[v])).filter(Boolean));
+  bloc("Par palier", Object.keys(agg.pal).filter((k) => +k > 0).sort((x, y) => y - x)
+    .map((k) => ligneBilan(etoilesDe(+k), agg.pal[k])).filter(Boolean));
+  L.push("", "⚠️ = le bot annonce trop haut · 💎 = le bot sous-estime (bon filon)");
+  return [L.join("\n")];
 }
 
 export default {
