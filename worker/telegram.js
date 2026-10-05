@@ -77,7 +77,7 @@ const AIDE =
   "/top — 🌟 le meilleur du jour, filtre par filtre\n" +
   "/demain — analyse de demain\n" +
   "/gardien — gardiens probables + corriger un partant\n" +
-  "/bilan — 📊 mes résultats : le bot vérifie ses pronos\n" +
+  "/bilan — 📊 mes résultats · « bilan hier » · « bilan 2026-10-05 » · « bilan semaine »\n" +
   "/dates — jours analysés\n" +
   "/aide — cette aide\n\n" +
   "<b>Texte libre</b> — combine comme tu veux :\n" +
@@ -748,8 +748,8 @@ async function traite(text) {
   const d = await index();
   const gm = String(text || "").trim().match(/^\/?gardiens?\s*(.*)$/i);
   if (gm) return fluxGardien(gm[1].trim(), d);
-  if (/^\/?(bilan|stats|efficacite|efficacité|reussite|réussite|resultats|résultats)$/i.test(String(text || "").trim()))
-    return fluxBilan(d);
+  const bm = String(text || "").trim().match(/^\/?(bilan|stats|efficacite|efficacité|reussite|réussite|resultats|résultats)(?:\s+(.*))?$/i);
+  if (bm) return fluxBilan(d, bm[2] || "");
   const q = parseRequete(text, d);
   const ds = dates(d);
   if (q.aide) return [AIDE];
@@ -1073,8 +1073,53 @@ function ligneBilan(lab, o) {
   if (o.n >= 15 && Math.abs(r - a) >= 10) flag = r < a ? " ⚠️ surévalué" : " 💎 sous-évalué";
   return lab + " : " + r + " % (annonce " + a + ") — " + o.n + " picks" + flag;
 }
-async function fluxBilan(d) {
+async function bilanJour(date) {
+  const res = await ENV.GARDIENS.get("result:" + date, "json").catch(() => null);
+  if (!res) {
+    const snap = await ENV.GARDIENS.get("prono:" + date, "json").catch(() => null);
+    if (snap && snap.picks)
+      return ["📊 <b>" + esc(date) + "</b> : " + snap.picks.length
+        + " pronos enregistrées — matchs pas finis ou pas encore vérifiés.\nRenvoie « bilan "
+        + esc(date) + " » plus tard."];
+    return ["📊 Rien pour le " + esc(date)
+      + " : je n'ai pas de pronos enregistrées ce jour-là."];
+  }
+  const L = ["📊 <b>BILAN " + esc(date) + "</b> — " + res.h + "/" + res.n
+    + " (" + Math.round(100 * res.h / res.n) + " %)"];
+  res.picks.forEach((p) => {
+    L.push((p.hit ? "✅ " : "❌ ") + esc(p.name) + " — " + esc(MK_BILAN[p.mk] || p.mk)
+      + " · " + pct(p.prob) + (p.val === "SUR" ? " ✅" : p.val === "VALUE" ? " 🔥" : ""));
+  });
+  return [L.join("\n")];
+}
+async function bilanSemaine() {
+  const lignes = [];
+  let n = 0, h = 0;
+  const auj = new Date();
+  for (let i = 0; i < 7; i++) {
+    const dt = new Date(auj.getTime() - i * 86400000).toISOString().slice(0, 10);
+    const res = await ENV.GARDIENS.get("result:" + dt, "json").catch(() => null);
+    if (!res) continue;
+    n += res.n; h += res.h;
+    lignes.push("• " + dt.slice(5).replace("-", "/") + " : " + res.h + "/" + res.n
+      + " (" + Math.round(100 * res.h / res.n) + " %)");
+  }
+  if (!n) return ["📊 <b>7 derniers jours</b> : rien de vérifié pour l'instant."];
+  return [["📊 <b>7 DERNIERS JOURS</b> — " + h + "/" + n
+    + " (" + Math.round(100 * h / n) + " %)", ...lignes].join("\n")];
+}
+async function fluxBilan(d, opt) {
   try { await majBilan(d, true); } catch (e) { /* tant pis */ }
+  const arg = na(String(opt || "")).trim();
+  if (arg) {
+    const iso = String(opt).match(/(\d{4})-(\d{2})-(\d{2})/);
+    if (iso) return bilanJour(iso[0]);
+    if (/^(hier|veille|yesterday)$/.test(arg))
+      return bilanJour(new Date(new Date(jourDefaut(d) + "T12:00:00Z").getTime() - 86400000)
+        .toISOString().slice(0, 10));
+    if (/^(semaine|7 jours|7jours|week)$/.test(arg)) return bilanSemaine();
+    return ["Écris « bilan hier », « bilan semaine » ou « bilan 2026-10-05 »."];
+  }
   const agg = await ENV.GARDIENS.get("bilan:agg", "json").catch(() => null);
   if (!agg || !agg.n)
     return ["📊 <b>BILAN</b>\nRien de vérifié pour l'instant : j'enregistre les pronos chaque jour et je compare aux résultats après les matchs. Repasse après les premiers matchs !"];
@@ -1090,6 +1135,7 @@ async function fluxBilan(d) {
   bloc("Par palier", Object.keys(agg.pal).filter((k) => +k > 0).sort((x, y) => y - x)
     .map((k) => ligneBilan(etoilesDe(+k), agg.pal[k])).filter(Boolean));
   L.push("", "⚠️ = le bot annonce trop haut · 💎 = le bot sous-estime (bon filon)");
+  L.push("Jour par jour : « bilan hier », « bilan 2026-10-05 », « bilan semaine ».");
   return [L.join("\n")];
 }
 

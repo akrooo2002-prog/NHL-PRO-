@@ -142,7 +142,8 @@ let WORKER;
   jeuxDefaut.forEach((g) => {
     if (cible || !g.ctx || !g.ctx.away || !g.ctx.away.goalie) return;
     const alt = (INDEX.goalieList[g.home] || []).find((x) => x.playerId !== g.ctx.away.goalie.playerId && x.sv);
-    if (alt && joueursDe(g.id).some((p) => p.abbr === g.away && p.lambdaSansGardien && !p.recrue && p.buteur && p.buteur.rank))
+    if (alt && joueursDe(g.id).filter((p) => p.abbr === g.away && p.lambdaSansGardien && !p.recrue
+      && p.buteur && p.buteur.rank && p.pointeur && p.pointeur.rank).length >= 2)
       cible = { g, alt, n: jeuxDefaut.indexOf(g) + 1 };
   });
   ok(!!cible, "données : un match avec gardien alternatif trouvable");
@@ -320,13 +321,27 @@ let WORKER;
     "bilan : vérifié sur les résultats réels (100 %) — 1 seul message Telegram non vide");
   ok(bb1.textes.includes("trop prudent") || bb1.textes.includes("sous-évalué"),
     "bilan : verdict de calibration (annoncé vs réalisé)");
-  const hier = ds.filter((x) => x < defaut).pop();   // jour précédent (forcemment différent de defaut)
+  // « hier » du worker = jour par défaut moins 1 jour calendrier
+  const hier = new Date(new Date(defaut + "T12:00:00Z").getTime() - 86400000).toISOString().slice(0, 10);
   kvStore.set("prono:" + hier, { value: JSON.stringify({ ts: Date.now(), date: hier,
     picks: [{ gid: 999, mk: "buteur", name: "Test", id: 1, prob: 0.5, conf: 50, pal: 3, val: "PROBABLE" }] }),
     metadata: null });
   global.NHL.boxscores["999"] = { gameState: "LIVE" };
   await dire("bilan");
   ok(!kvStore.get("result:" + hier), "bilan : match pas fini → pas encore vérifié (réessaiera)");
+  const bj = await dire("bilan " + defaut);
+  const snap0 = snap.picks.filter((x) => x.mk === "buteur")[0];
+  ok(bj.textes.includes("BILAN " + defaut) && bj.textes.includes("100 %")
+    && bj.textes.includes("✅ " + snap0.name),
+    "bilan par date : détail pick par pick (" + snap0.name + " ✅)");
+  const bh = await dire("bilan hier");
+  ok(bh.textes.includes("pas finis") || bh.textes.includes("pas encore vérifiés"),
+    "bilan hier : jour pas terminé → annoncé clairement");
+  const bsm = await dire("bilan semaine");
+  ok(bsm.textes.includes("7 DERNIERS JOURS") && bsm.textes.includes("100 %"),
+    "bilan semaine : cumul des 7 derniers jours");
+  const bz = await dire("bilan zzz");
+  ok(bz.textes.includes("bilan hier"), "bilan : argument invalide → guidance");
 
   console.log(echecs === 0 ? "RESULTAT WORKER CLOUDFLARE : TOUT EST OK (" + n + " vérifications)"
                            : "RESULTAT WORKER CLOUDFLARE : " + echecs + " ECHECS / " + n);

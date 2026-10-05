@@ -675,6 +675,7 @@ def rookie_record(p, ctx, land, bio, lg_sh_pct, preseason):
         "form3": {"n": 0, "g": 0, "pts": 0},
         "lambda": {"g": round(lam_g, 3), "a": round(lam_a, 3), "pts": round(lam_p, 3)},
         "lambdaSansGardien": {"g": round(lam_g_nog, 3), "a": round(lam_a_nog, 3)},
+        "forme": {"n": 0, "g": 0, "a": 0, "pts": 0, "multG": 1.0, "multA": 1.0},
         "milestones": {"g": {"next": None, "gap": None, "f": 0.0},
                        "a": {"next": None, "gap": None, "f": 0.0},
                        "pts": {"next": None, "gap": None, "f": 0.0}},
@@ -789,18 +790,39 @@ def player_record(p, ctx, sk_by_season, log, active, ref, career, lg_sh_pct,
 
     # --- 4. buts / passes / points attendus ---
     # 5v5 : pondéré par la défense adverse et le gardien adverse
+    # --- la forme actuelle prime sur la moyenne carrière ---
+    # mélange bayésien : les 5 derniers matchs comptent comme 5 matchs, la
+    # saison comme 10 matchs « fantômes ». Un joueur à 3 pts/match depuis 4-5
+    # matchs remonte fort, mais la série est bornée (×0,80 à ×1,80) pour
+    # qu'un coup de chaud bref ne fabrique pas un faux favori.
+    K_FORM = 10.0
+    mult_g = mult_a = 1.0
+    g5 = a5 = p5 = 0.0
+    n_f = float(len(form)) if form else 0.0
+    if form:
+        g5 = float(sum(x.get("goals", 0) or 0 for x in form))
+        a5 = float(sum(x.get("assists", 0) or 0 for x in form))
+        p5 = float(sum(x.get("points", 0) or 0 for x in form))
+        gpg_form = (g5 + K_FORM * gpg) / (n_f + K_FORM)
+        apg_form = (a5 + K_FORM * apg) / (n_f + K_FORM)
+        if gpg > 0:
+            mult_g = clamp(gpg_form / gpg, 0.80, 1.80)
+        if apg > 0:
+            mult_a = clamp(apg_form / apg, 0.80, 1.80)
+
     ev_lam = ev_gpg * ctx["defF"] * ctx["goalieF"]
-    # le taux global capte aussi la qualité de l'équipe et le volume de tirs
-    fg = 0.70 * gpg + 0.30 * formG if form else gpg
+    # le taux global capte la qualité de l'équipe et le volume de tirs
+    # (la forme passe désormais par les multiplicateurs, plus de double-compte)
+    fg = gpg
     tot_lam = fg * ctx["defF"] * ctx["goalieF"] * ctx["shotsAggF"] ** 0.5
-    lam_g = max(0.0, 0.60 * ev_lam + 0.40 * tot_lam) * h2h_f
+    lam_g = max(0.0, 0.60 * ev_lam + 0.40 * tot_lam) * h2h_f * mult_g
     # un % de tir au-dessus de sa moyenne 5 ans + ligue finit par redescendre :
     # on projette les buts sur le % de tir régressé, pas sur le % de tir constaté.
     if sh_pct and exp_sh:
         lam_g *= clamp(exp_sh / sh_pct, 0.70, 1.30)
 
     # passes : les siennes + une part de celles que ses propres buts génèrent (2 par but)
-    lam_a = max(0.0, apg * 0.92 * h2h_f * ctx["goalieF"] * (0.55 + 0.45 * ctx["offF"])
+    lam_a = max(0.0, apg * mult_a * 0.92 * h2h_f * ctx["goalieF"] * (0.55 + 0.45 * ctx["offF"])
                 + 2 * 0.30 * lam_g)
     # un joueur à 1 ou 2 unités d'un palier rond cherche ce point : léger bonus
     lam_g *= (1 + 0.08 * msG0)
@@ -842,6 +864,8 @@ def player_record(p, ctx, sk_by_season, log, active, ref, career, lg_sh_pct,
         "form3": {"n": len(form3), "g": f3g, "pts": f3p},
         "lambda": {"g": round(lam_g, 3), "a": round(lam_a, 3), "pts": round(lam_p, 3)},
         "lambdaSansGardien": {"g": round(lam_g_nog, 3), "a": round(lam_a_nog, 3)},
+        "forme": {"n": int(n_f), "g": g5, "a": a5, "pts": p5,
+                  "multG": round(mult_g, 3), "multA": round(mult_a, 3)},
         "milestones": {"g": {"next": nxtG, "gap": gapG, "f": round(msG, 2)},
                        "a": {"next": nxtA, "gap": gapA, "f": round(msA, 2)},
                        "pts": {"next": nxtP, "gap": gapP, "f": round(msP, 2)}},
@@ -901,6 +925,10 @@ def justify(kind, rec, ctx):
     if r["toiMin"]:
         bits.append(f"TGL {f1(r['toiMin'])} min/match")
     bits.append(f"{f1(rec['perGame']['sh'])} tir/match")
+    fm = rec.get("forme") or {}
+    if fm.get("n", 0) >= 3 and max(fm.get("multG", 1.0), fm.get("multA", 1.0)) >= 1.2:
+        bits.append(f"🔥 en forme : {f2(fm['pts'] / fm['n'])} pts/match sur ses "
+                    f"{fm['n']} derniers (saison : {f2(rec['perGame'].get('pts') or 0)})")
     if kind == "buteur":
         bits.append(f"{f2(rec['perGame']['g'])} but/match à {pc(r['shPct'])} de réussite")
         if rec["regressionRisk"] is not None and abs(rec["regressionRisk"]) >= 6:

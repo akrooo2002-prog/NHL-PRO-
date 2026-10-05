@@ -211,14 +211,19 @@ const note = (cond, label, extra = "") => {
     .sort((a, b) => a.pointeur.rank - b.pointeur.rank)[0];
   const opp = "home";
   const opts = X.goalieOptions(g0, g0.home);
-  const faible = opts.filter(x => x.sv).sort((a, b) => a.sv - b.sv)[0];   // le PLUS FAIBLE sv => probabilité plus haute
+  // sv le plus faible => probabilité la plus haute (comparaison faible vs fort,
+  // indépendante du gardien déjà annoncé qui peut être l'un des deux)
+  const tri = opts.filter(x => x.sv).sort((a, b) => a.sv - b.sv);
+  const faible = tri[0], fort = tri[tri.length - 1];
   S.ov[g0.id] = { goalies: { [opp]: faible.playerId }, absents: [] };
-  const apres = X.effG(g0);
-  const q = apres.players.find(p => p.id === cible.id);
-  ok(q.pointeur.prob > cible.pointeur.prob, "gardien adverse plus faible => probabilité plus haute",
-     `${(100 * cible.pointeur.prob).toFixed(1)} % -> ${(100 * q.pointeur.prob).toFixed(1)} %`);
-  ok(Math.abs(q.pointeur.lam - cible.pointeur.lam) > 1e-6, "λ recalculé",
-     cible.pointeur.lam + " -> " + q.pointeur.lam);
+  const q = X.effG(g0).players.find(p => p.id === cible.id);
+  S.ov[g0.id] = { goalies: { [opp]: fort.playerId }, absents: [] };
+  const q2 = X.effG(g0).players.find(p => p.id === cible.id);
+  ok(fort.sv > faible.sv && q.pointeur.prob > q2.pointeur.prob,
+     "gardien adverse plus faible => probabilité plus haute",
+     `${(100 * q2.pointeur.prob).toFixed(1)} % (fort) -> ${(100 * q.pointeur.prob).toFixed(1)} % (faible)`);
+  ok(Math.abs(q.pointeur.lam - q2.pointeur.lam) > 1e-6, "λ recalculé",
+     q2.pointeur.lam + " -> " + q.pointeur.lam);
   S.ov[g0.id] = { goalies: { [opp]: 99999999 }, absents: [] };
   const ign = X.effG(g0);
   ok(Math.abs(ign.players.find(p => p.id === cible.id).pointeur.prob - cible.pointeur.prob) < 1e-9,
