@@ -1016,7 +1016,7 @@ async function verifieJour(date) {
     let b;
     try {
       const r = await fetch(NHL_API + "/gamecenter/" + gid + "/boxscore",
-        { headers: { "User-Agent": "nhl-pronos-bot" } });
+        { headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36" } });
       if (!r.ok) return 0;
       b = await r.json();
     } catch (e) { return 0; }
@@ -1150,7 +1150,7 @@ async function fluxNews() {
   if (!cache || Date.now() - (cache.ts || 0) > 15 * 60000) {
     try {
       const r = await fetch("https://site.api.espn.com/apis/site/v2/sports/hockey/nhl/news",
-        { headers: { "User-Agent": "nhl-pronos-bot" } });
+        { headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36" } });
       const arts = ((await r.json()).articles || []).slice(0, 8);
       cache = { ts: Date.now(), arts: arts.map((a) => ({
         h: String(a.headline || "").slice(0, 160),
