@@ -80,6 +80,30 @@ def etoiles(n):
     return "★" * n + "☆" * (5 - n)
 
 
+def _nrm(s):
+    import unicodedata as _ud
+    return _ud.normalize("NFD", str(s or "")).encode("ascii", "ignore").decode().lower().strip()
+
+
+_NEWS_CACHE = {}
+
+
+def news_par_abbr(raw):
+    """Blessés ESPN → {ABBR: {nom_normalisé: entrée}} (plein nom + nom de famille)."""
+    if not _NEWS_CACHE:
+        for ab, lst in (raw.get("newsBlesses") or {}).items():
+            mp = {}
+            for e in lst:
+                nm = _nrm(e.get("name"))
+                if nm:
+                    mp[nm] = e
+                    fam = nm.split()[-1]
+                    if len(fam) > 3:
+                        mp.setdefault(fam, e)
+            _NEWS_CACHE[ab] = mp
+    return _NEWS_CACHE
+
+
 def poisson_geq(lam, k):
     """P(X >= k) pour une loi de Poisson de paramètre lam (somme partielle)."""
     if lam <= 0:
@@ -186,6 +210,8 @@ def confidence(prob, gp, flags, preseason):
         c_data = 82 + 18 * ((gp - 20) / 25)
     if "absent" in flags:
         c_data *= 0.30
+    if "news_doute" in flags:
+        c_data *= 0.85
     elif "hors_echantillon" in flags:
         c_data *= 0.90
     if "echantillon" in flags:
@@ -341,6 +367,7 @@ def run(raw):
                 "pkPct": st_opp.get("penaltyKillPct"), "ppPct": st_opp.get("powerPlayPct"),
                 "goalieF": goalie_f, "goalie": gg,
                 "b2b": yest in play_dates.get(abbr, set()),
+                "news": news_par_abbr(raw).get(abbr) or {},
             }
 
         # compos officielles (si publiées) : les rayés sont marqués absents
@@ -734,6 +761,22 @@ def player_record(p, ctx, sk_by_season, log, active, ref, career, lg_sh_pct,
     car = career.get(p["id"], {})
     reg = min(1.0, gp / 35)
     flags = []
+
+    # --- 0. actu blessures (ESPN) : IR/Out = absent, Day-To-Day = doute ---
+    _nom_news = _nrm(f"{(p.get('firstName') or {}).get('default', '')} "
+                     f"{(p.get('lastName') or {}).get('default', '')}")
+    newse = (ctx.get("news") or {}).get(_nom_news)
+    if not newse:
+        _fam = _nom_news.split()[-1] if _nom_news else ""
+        if len(_fam) > 3:
+            newse = (ctx.get("news") or {}).get(_fam)
+    mult_news = float((newse or {}).get("mult") or 1.0)
+    if newse:
+        flags.append("news_blesse")
+        if mult_news <= 0.2:
+            flags.append("absent")
+        else:
+            flags.append("news_doute")
     risk, exp_sh = None, sh_pct
     if sh_pct and sh >= 40 and car.get("shPct") and car.get("sh", 0) >= 250:
         cible = 0.5 * car["shPct"] + 0.5 * lg_sh_pct
@@ -827,6 +870,8 @@ def player_record(p, ctx, sk_by_season, log, active, ref, career, lg_sh_pct,
     # un joueur à 1 ou 2 unités d'un palier rond cherche ce point : léger bonus
     lam_g *= (1 + 0.08 * msG0)
     lam_a *= (1 + 0.08 * msA0)
+    lam_g *= mult_news
+    lam_a *= mult_news
     lam_p = lam_g + lam_a
 
     # λ sans l'effet gardien : permet de recalculer côté client si le gardien est corrigé
@@ -866,6 +911,9 @@ def player_record(p, ctx, sk_by_season, log, active, ref, career, lg_sh_pct,
         "lambdaSansGardien": {"g": round(lam_g_nog, 3), "a": round(lam_a_nog, 3)},
         "forme": {"n": int(n_f), "g": g5, "a": a5, "pts": p5,
                   "multG": round(mult_g, 3), "multA": round(mult_a, 3)},
+        "news": ({"txt": ((newse.get("status") or "Blessé")
+                          + (" — " + newse["comment"] if newse.get("comment") else ""))[:140],
+                  "mult": mult_news} if newse else None),
         "milestones": {"g": {"next": nxtG, "gap": gapG, "f": round(msG, 2)},
                        "a": {"next": nxtA, "gap": gapA, "f": round(msA, 2)},
                        "pts": {"next": nxtP, "gap": gapP, "f": round(msP, 2)}},
@@ -929,6 +977,9 @@ def justify(kind, rec, ctx):
     if fm.get("n", 0) >= 3 and max(fm.get("multG", 1.0), fm.get("multA", 1.0)) >= 1.2:
         bits.append(f"🔥 en forme : {f2(fm['pts'] / fm['n'])} pts/match sur ses "
                     f"{fm['n']} derniers (saison : {f2(rec['perGame'].get('pts') or 0)})")
+    nw = rec.get("news")
+    if nw:
+        bits.append("📰 " + nw["txt"])
     if kind == "buteur":
         bits.append(f"{f2(rec['perGame']['g'])} but/match à {pc(r['shPct'])} de réussite")
         if rec["regressionRisk"] is not None and abs(rec["regressionRisk"]) >= 6:

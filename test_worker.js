@@ -16,6 +16,10 @@ global.fetch = async (url, opts) => {
     if (!fs.existsSync(f)) return { ok: false, status: 404 };
     return { ok: true, status: 200, json: async () => JSON.parse(fs.readFileSync(f, "utf8")) };
   }
+  if (url.includes("site.api.espn.com")) {
+    if (!global.ESPN_FIXTURE) return { ok: false, status: 404 };
+    return { ok: true, status: 200, json: async () => global.ESPN_FIXTURE };
+  }
   if (url.includes("api-web.nhle.com")) {
     if (!global.NHL) return { ok: false, status: 404 };
     const mb = url.match(/gamecenter\/(\d+)\/boxscore/);
@@ -305,6 +309,9 @@ let WORKER;
       const cb = ((g.combos || {})[side] || {})[t];
       ((cb || {}).members || []).forEach((m) => ajouteJ(m.id));
     }));
+    ["outsiders", "outsidersButeur", "outsidersPointeur", "outsidersDoubleButeur",
+     "outsidersTripleButeur", "outsidersDoublePointeur", "outsidersTriplePointeur"]
+      .forEach((k) => (g[k] || []).forEach((o) => ajouteJ(o.id)));
     boxscores[String(g.id)] = { gameState: "OFF",
       playerByGameStats: { awayTeam: { forwards: fw, defense: [] },
                            homeTeam: { forwards: [], defense: [] } } };
@@ -342,6 +349,15 @@ let WORKER;
     "bilan semaine : cumul des 7 derniers jours");
   const bz = await dire("bilan zzz");
   ok(bz.textes.includes("bilan hier"), "bilan : argument invalide → guidance");
+
+  // ---------- /news : actus NHL en direct (ESPN) ----------
+  global.ESPN_FIXTURE = { articles: [
+    { headline: "Panthers' Aleksander Barkov avoids surgery; out 6-8 weeks", published: "2026-10-06T19:28Z" },
+    { headline: "Scoreless Leafs rookie McKenna on slow start", published: "2026-10-06T20:20Z" }] };
+  const nwa = await dire("news");
+  ok(nwa.textes.includes("ACTUS NHL") && nwa.textes.includes("Barkov")
+    && nwa.textes.includes("10-06 19:28"),
+    "📰 /news : actus NHL en direct (ESPN)");
 
   console.log(echecs === 0 ? "RESULTAT WORKER CLOUDFLARE : TOUT EST OK (" + n + " vérifications)"
                            : "RESULTAT WORKER CLOUDFLARE : " + echecs + " ECHECS / " + n);

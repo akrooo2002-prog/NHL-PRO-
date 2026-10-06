@@ -78,6 +78,7 @@ const AIDE =
   "/demain — analyse de demain\n" +
   "/gardien — gardiens probables + corriger un partant\n" +
   "/bilan — 📊 mes résultats · « bilan hier » · « bilan 2026-10-05 » · « bilan semaine »\n" +
+  "/news — 📰 actus NHL en direct (blessures, compos)\n" +
   "/dates — jours analysés\n" +
   "/aide — cette aide\n\n" +
   "<b>Texte libre</b> — combine comme tu veux :\n" +
@@ -229,6 +230,7 @@ function confidenceFr(prob, gp, flags, preseason) {
   else if (gp < 45) cData = 82 + 18 * ((gp - 20) / 25);
   if (flags.includes("absent")) cData *= 0.30;
   else if (flags.includes("hors_echantillon")) cData *= 0.90;
+  if (flags.includes("news_doute")) cData *= 0.85;
   if (flags.includes("echantillon")) cData *= 0.88;
   if (flags.includes("b2b")) cData *= 0.93;
   if (preseason) cData *= 0.80;
@@ -650,8 +652,8 @@ function selection(jeux, q) {
 
 /* ---------- mise en forme ---------- */
 function ligneJoueur(p, mk, i) {
-  return " " + (i + 1) + ". " + esc(p.name) + " " + (p[mk].etoiles || "") + " " + pct(p[mk].prob)
-    + vTxt(p[mk].valeur);
+  return " " + (i + 1) + ". " + esc(p.name) + (p.news ? " 📰" : "") + " "
+    + (p[mk].etoiles || "") + " " + pct(p[mk].prob) + vTxt(p[mk].valeur);
 }
 function blocMatch(g, marches) {
   const L = [];
@@ -750,6 +752,8 @@ async function traite(text) {
   if (gm) return fluxGardien(gm[1].trim(), d);
   const bm = String(text || "").trim().match(/^\/?(bilan|stats|efficacite|efficacité|reussite|réussite|resultats|résultats)(?:\s+(.*))?$/i);
   if (bm) return fluxBilan(d, bm[2] || "");
+  if (/^\/?(news|actus|actualites|actualités|infos)$/i.test(String(text || "").trim()))
+    return fluxNews();
   const q = parseRequete(text, d);
   const ds = dates(d);
   if (q.aide) return [AIDE];
@@ -1137,6 +1141,28 @@ async function fluxBilan(d, opt) {
   L.push("", "⚠️ = le bot annonce trop haut · 💎 = le bot sous-estime (bon filon)");
   L.push("Jour par jour : « bilan hier », « bilan 2026-10-05 », « bilan semaine ».");
   return [L.join("\n")];
+}
+
+// ---- 📰 actus NHL en direct (ESPN, sans clé) — cache KV 15 min ----
+async function fluxNews() {
+  let cache = null;
+  if (ENV.GARDIENS) cache = await ENV.GARDIENS.get("espn:news", "json").catch(() => null);
+  if (!cache || Date.now() - (cache.ts || 0) > 15 * 60000) {
+    try {
+      const r = await fetch("https://site.api.espn.com/apis/site/v2/sports/hockey/nhl/news",
+        { headers: { "User-Agent": "nhl-pronos-bot" } });
+      const arts = ((await r.json()).articles || []).slice(0, 8);
+      cache = { ts: Date.now(), arts: arts.map((a) => ({
+        h: String(a.headline || "").slice(0, 160),
+        d: String(a.published || "").slice(5, 16).replace("T", " ") })) };
+      if (ENV.GARDIENS && cache.arts.length)
+        await ENV.GARDIENS.put("espn:news", JSON.stringify(cache), { expirationTtl: 86400 }).catch(() => {});
+    } catch (e) { /* tant pis : on garde l'ancien cache */ }
+  }
+  if (!cache || !cache.arts || !cache.arts.length)
+    return ["📰 Actus indisponibles pour le moment."];
+  return [["📰 <b>ACTUS NHL</b> (ESPN)",
+    ...cache.arts.map((a) => "• " + esc(a.h) + (a.d ? "  <i>(" + esc(a.d) + ")</i>" : ""))].join("\n")];
 }
 
 export default {

@@ -205,9 +205,13 @@ const note = (cond, label, extra = "") => {
 
   // ---------- 3. override gardien ----------
   console.log("\n--- override gardien ---");
-  const g0 = S.d.games.find(g => !g.preseason) || S.d.games[0];
+  const g0 = S.d.games.find(g => {
+    const o = X.goalieOptions(g, g.home).filter(x => x.sv);
+    return o.length >= 2 && o[0].sv !== o[o.length - 1].sv;
+  }) || S.d.games.find(g => !g.preseason) || S.d.games[0];
   const base = X.effG(g0);
-  const cible = base.players.filter(p => p.abbr === g0.away && p.pointeur.score > 0)
+  const cible = base.players.filter(p => p.abbr === g0.away && p.pointeur.score > 0
+    && !(p.flags || []).includes("absent") && !(p.flags || []).includes("news_blesse"))
     .sort((a, b) => a.pointeur.rank - b.pointeur.rank)[0];
   const opp = "home";
   const opts = X.goalieOptions(g0, g0.home);
@@ -289,7 +293,11 @@ const note = (cond, label, extra = "") => {
   S.d.games.forEach(g => {
     ["buteur", "passeur", "pointeur"].forEach(mk => {
       const rec = g.players.filter(p => p.recrue && p[mk].rank);
-      const eta = g.players.filter(p => !p.recrue && p[mk].rank);
+      // invariant : une recrue (indice figé 51, palier plafonné) ne passe jamais
+      // devant un établi SOLIDE (conf >= 55). Les établis faibles/blessés/petit
+      // échantillon peuvent légitimement descendre sous une recrue.
+      const eta = g.players.filter(p => !p.recrue && p[mk].rank
+        && (p[mk].confidence || 0) >= 55);
       if (!rec.length || !eta.length) return;
       verif++;
       const mR = Math.min(...rec.map(p => p[mk].rank));
@@ -297,7 +305,7 @@ const note = (cond, label, extra = "") => {
       if (mR < mE) doubl++;
     });
   });
-  ok(doubl === 0, "aucune recrue ne passe devant un joueur établi", doubl + " cas sur " + verif);
+  ok(doubl === 0, "aucune recrue ne passe devant un établi solide (conf ≥ 55)", doubl + " cas sur " + verif);
 
   // ---------- 7. Live : lecture des buteurs ----------
   console.log("\n--- live ---");

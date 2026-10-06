@@ -364,6 +364,48 @@ def _norme(s):
             .decode().lower().strip())
 
 
+ESPN_INJ = "https://site.api.espn.com/apis/site/v2/sports/hockey/nhl/injuries"
+
+
+def espn_blesses(payload):
+    """Blessés/incertains (ESPN, sans clé) → {ABBR: [{name,status,comment,mult}]}.
+    IR/Out = absent (λ ×0,10) · Day-To-Day/Questionable = doute (λ ×0,65)."""
+    try:
+        d = get(ESPN_INJ) or {}
+    except Exception as e:
+        print(f"     ESPN blessés indisponible : {e}")
+        return {}
+    nom2abbr = {}
+    for ab, t in (payload.get("teamIndex") or {}).items():
+        if t.get("nameEn"):
+            nom2abbr[_norme(t["nameEn"])] = ab
+    out, n = {}, 0
+    for t in d.get("injuries") or []:
+        ab = nom2abbr.get(_norme(t.get("displayName")))
+        if not ab:
+            continue
+        for i in t.get("injuries") or []:
+            ath = i.get("athlete") or {}
+            nom = ath.get("displayName")
+            if not nom:
+                continue
+            statut = (i.get("status") or "").lower()
+            com = str(i.get("longComment") or i.get("shortComment") or "")
+            if len(com) <= 5:            # commentaire du type « ir » : sans intérêt
+                com = ""
+            if statut in ("injured reserve", "out") or "long term" in statut:
+                mult = 0.10
+            elif "day-to-day" in statut or "questionable" in statut:
+                mult = 0.65
+            else:
+                mult = 0.80
+            out.setdefault(ab, []).append({"name": nom, "status": i.get("status"),
+                                           "comment": com[:110], "mult": mult})
+            n += 1
+    print(f"     ESPN : {n} blessés sur {len(out)} équipes")
+    return out
+
+
 def dailyfaceoff_overrides(payload):
     """Gardiens confirmés → overrides {id_match: {"goalies": {"away"|"home": playerId}}}."""
     try:
@@ -440,6 +482,8 @@ def main(argv=None):
     payload = collecte(games)
     print("     gardiens confirmés (Daily Faceoff)…")
     payload["overrides"] = dailyfaceoff_overrides(payload)
+    print("     blessés (ESPN)…")
+    payload["newsBlesses"] = espn_blesses(payload)
     path = os.path.join(OUT, "pronos.json")
     with open(path, "w") as fh:
         json.dump(payload, fh, separators=(",", ":"))

@@ -330,7 +330,8 @@ const MKD={buteur:"marquer un but",passeur:"délivrer une passe",pointeur:"marqu
 const FRL={absent:"absent du dernier match",hors_echantillon:"forme non mesurée",
   b2b:"back-to-back",tir_chaud:"% de tir intenable",tir_froid:"réussite froide",
   pp_gonfle:"points gonflés par l'AN",echantillon:"petit échantillon",
-  manuel_absent:"absent (déclaré)",recrue:"recrue",en_hausse:"en hausse"};
+  manuel_absent:"absent (déclaré)",recrue:"recrue",en_hausse:"en hausse",
+  news_blesse:"📰 blessé (actu)",news_doute:"📰 incertain (actu)"};
 
 /* ============================ formatage ============================ */
 const lab=s=>s?String(s).slice(0,4)+"-"+String(s).slice(4):"—";
@@ -465,7 +466,9 @@ function toast(msg,ms){
 /* ============ moteur client (recalcul si gardien corrigé / absent) ============ */
 const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
 function effG(game){
-  const g={...game};
+  // copies profondes de ctx : effG ne doit JAMAIS muter le match d'origine
+  // (sinon 2 corrections de gardien successives corrompent l'identité du gardien)
+  const g={...game,ctx:{away:{...game.ctx.away},home:{...game.ctx.home}}};
   g.goalieOptions={away:goalieOptions(g,g.away),home:goalieOptions(g,g.home)};
   g.players=(game.players||[]).map(p=>({...p,buteur:{...p.buteur},passeur:{...p.passeur},pointeur:{...p.pointeur},
     ...(p.doubleButeur?{doubleButeur:{...p.doubleButeur},tripleButeur:{...p.tripleButeur},
@@ -479,7 +482,7 @@ function effG(game){
     if(!gk||!gk.sv) continue;
     const nouveau=clamp((1-gk.sv)/(1-S.d.league.savePctAvg),0.5,1.8);
     me.goalieF=nouveau;
-    me.goalie={...(me.goalie||{}),name:gk.name,sv:gk.sv,gaa:gk.gaa,confirmed:true};
+    me.goalie={...(me.goalie||{}),playerId:gk.playerId,name:gk.name,sv:gk.sv,gaa:gk.gaa,confirmed:true};
     g.players.filter(p=>p.abbr===me.abbr).forEach(p=>{
       const ng=p.lambdaSansGardien.g*nouveau;
       const na=(p.lambdaSansGardien.a-2*0.30*p.lambda.g)*nouveau+2*0.30*ng;
@@ -549,6 +552,7 @@ function confiance(prob,gp,flags,pre){
   let c=100*Math.pow(Math.max(0,Math.min(1,prob)),0.55), d=100;
   if(gp<20) d=42+58*(gp/20); else if(gp<45) d=82+18*((gp-20)/25);
   if(flags.includes("absent")||flags.includes("manuel_absent")) d*=0.30;
+  if(flags.includes("news_doute")) d*=0.85;
   else if(flags.includes("hors_echantillon")) d*=0.90;
   if(flags.includes("echantillon")) d*=0.88;
   if(flags.includes("b2b")) d*=0.93;
