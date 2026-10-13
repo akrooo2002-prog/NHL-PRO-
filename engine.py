@@ -663,7 +663,7 @@ def run(raw):
                 risques.append("sans " + " ni ".join(t.split()[-1] for t in tops[:2]))
             gkf = (ctx[fav].get("goalie") or {}).get("sv") or 0.0
             gko = (ctx["home" if fav == "away" else "away"].get("goalie") or {}).get("sv") or 0.0
-            if gkf and gko and gkf < gko - 0.008:
+            if gkf and gko and gkf < gko - 0.015:
                 risques.append("gardien en dedans")
             if risques:
                 piege = g[fav] + " favori mais " + " · ".join(risques)

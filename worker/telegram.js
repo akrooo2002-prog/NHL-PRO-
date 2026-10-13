@@ -78,6 +78,8 @@ const AIDE =
   "/demain — analyse de demain\n" +
   "/gardien — gardiens probables + corriger un partant\n" +
   "/bilan — 📊 mes résultats · « bilan hier » · « bilan 2026-10-05 » · « bilan semaine »\n" +
+  "/classement — 📊 % décroissant, marché au choix par boutons\n" +
+  "/refresh — 🔄 gardiens revérifiés + analyses réadaptées\n" +
   "/news — 📰 actus NHL en direct (blessures, compos)\n" +
   "/dates — jours analysés\n" +
   "/aide — cette aide\n\n" +
@@ -111,8 +113,28 @@ const OUTS_CHAMP = { outsider: "outsiders", outsiderButeur: "outsidersButeur",
   outsiderTriplePointeur: "outsidersTriplePointeur" };
 // ✅ sûr = tête du marché + indice solide · 🔥 valeur = 3 derniers matchs très au-dessus
 const vTxt = (v) => (v === "VALUE" ? " 🔥" : v === "SUR" ? " ✅" : "");
+
+/* ---- identité visuelle : couleur primaire de chaque organisation ---- */
+const COULEURS = { ANA: "🟧", BOS: "🟨", BUF: "🟦", CAR: "🟥", CBJ: "🟦", CGY: "🟥",
+  CHI: "🟥", COL: "🟪", DAL: "🟩", DET: "🟥", EDM: "🟧", FLA: "🟥", LAK: "⬛",
+  MTL: "🟥", MIN: "🟩", NSH: "🟨", NJD: "🟥", NYI: "🟦", NYR: "🟦", OTT: "🟥",
+  PHI: "🟧", PIT: "⬛", SEA: "🟦", SJS: "🟦", STL: "🟦", TBL: "🟦", TOR: "🟦",
+  UTA: "⬛", VAN: "🟦", VGK: "🟨", WPG: "🟦", WSH: "🟥" };
+const eq = (ab) => (COULEURS[ab] || "⚪") + " " + esc(ab || "?");
+const MOIS_FR = ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août",
+  "sept.", "oct.", "nov.", "déc."];
+const JOURS_FR = ["dim.", "lun.", "mar.", "mer.", "jeu.", "ven.", "sam."];
+const dateFr = (iso) => {
+  const dt = new Date(String(iso) + "T12:00:00Z");
+  return JOURS_FR[dt.getUTCDay()] + " " + (+String(iso).slice(8, 10)) + " "
+    + MOIS_FR[+String(iso).slice(5, 7) - 1];
+};
+const SEP = "──────────────";
+const MED = ["🥇", "🥈", "🥉"];
+const rang = (i) => (i < 3 ? MED[i] : " " + (i + 1) + ".");
 const ETAT_DEF = "13"; // buteur + pointeur, comme le site
 
+const encodeEtat = (codes, jourIdx) => (codes.length ? codes.join("") : "13") + "@" + Math.max(0, jourIdx);
 function decodeEtat(etat) {
   const parties = String(etat || "").split("@");
   const codes = [...(parties[0] || "")].filter((c) => CODES.includes(c));
@@ -137,6 +159,7 @@ function kbMenu(etat, d) {
     [btn("🏆 Podium", "P:" + etat), btn("🌟 Top du jour", "O:" + etat)],
     [btn("🥅 Gardiens", "Y:" + etat), btn("📅 " + date.slice(5).replace("-", "/"), "K:" + etat)],
     [btn("📊 Bilan", "B:" + etat), btn("❓ Aide", "A")],
+    [btn("📊 Classement %", "C:" + etat), btn("🔄 Refresh", "W:" + etat)],
   ] };
 }
 function kbFiltres(etat) {
@@ -251,11 +274,11 @@ const pcfr = (x, dd) => (x === null || x === undefined ? "—"
 // 20 minutes, on relit la source. Seuls les statuts « Confirmed » sont retenus.
 const DFO_URL = "https://www.dailyfaceoff.com/starting-goalies";
 const DFO_TTL = 20 * 60 * 1000;
-async function dfoConfirms(date, d) {
+async function dfoConfirms(date, d, force) {
   const cle = "dfo:" + date;
   let cache = null;
   if (ENV.GARDIENS) { try { cache = await ENV.GARDIENS.get(cle, "json"); } catch (e) { /* tant pis */ } }
-  if (cache && Date.now() - (cache.ts || 0) < DFO_TTL) return cache.ov || {};
+  if (!force && cache && Date.now() - (cache.ts || 0) < DFO_TTL) return cache.ov || {};
   let ov = (cache && cache.ov) || {};           // source injoignable → dernier état connu
   try {
     const r = await fetch(DFO_URL, { headers: {
@@ -592,10 +615,10 @@ async function fluxGardien(rest, d) {
     + esc(date) + " sont adaptées (3 jours).\n« gardien annule " + esc(tm) + " » pour revenir à l'annonce.\n";
   return [head + blocMatch(jeu, ["buteur", "pointeur"])];
 }
-async function jourAdapte(date, d) {
+async function jourAdapte(date, d, force) {
   const jeux = await jourComplet(date);
   // confirmations Daily Faceoff + corrections manuelles (le manuel a priorité)
-  const ov = Object.assign({}, await dfoConfirms(date, d), await overridesJour(date));
+  const ov = Object.assign({}, await dfoConfirms(date, d, force), await overridesJour(date));
   if (Object.keys(ov).length) jeux.forEach((g) => adapteMatch(g, ov, d));
   return jeux;
 }
@@ -685,15 +708,15 @@ function ligneJoueur(p, mk, i) {
 }
 function blocMatch(g, marches) {
   const L = [];
-  L.push("🏒 <b>" + mLabel(g) + "</b> · " + heureFr(g.startUtc)
+  L.push("🏒 " + eq(g.away) + " <b>@</b> " + eq(g.home) + " · " + heureFr(g.startUtc)
     + (g.preseason ? " · ⚠️ présaison" : "")
     + (g.piege ? "\n⚠️ <b>PIÈGE</b> — " + esc(g.piege) : ""));
   const gkA = g.ctx && g.ctx.home ? g.ctx.home.goalie : null;   // ctx porte le gardien ADVERSE
   const gkH = g.ctx && g.ctx.away ? g.ctx.away.goalie : null;
   if (gkA || gkH)
-    L.push("🥅 " + esc(g.away) + " " + gkTxt(gkA) + " · " + esc(g.home) + " " + gkTxt(gkH));
+    L.push("🥅 " + eq(g.away) + " " + gkTxt(gkA) + " · " + eq(g.home) + " " + gkTxt(gkH));
   if ((g.adaptations || []).length)
-    L.push("🧤 " + g.adaptations.map((x) => esc(x.equipe) + " → " + esc(x.nom)).join(" · "));
+    L.push("🧤 " + g.adaptations.map((x) => eq(x.equipe) + " → " + esc(x.nom)).join(" · "));
   for (const mk of marches) {
     if (mk === "outsider") {
       if ((g.outsiders || []).length) {
@@ -728,14 +751,70 @@ function blocMatch(g, marches) {
     }
     // marché simple : top 3 par équipe, une ligne, % décroissant
     const lab = MARCHES.find((m) => m[0] === mk)[1].toUpperCase();
-    [["away", "🔵"], ["home", "🔴"]].forEach(([side, ic]) => {
+    if (marches.indexOf(mk) === marches.findIndex((x) => MK_SIMPLE.includes(x)))
+      L.push("🎯 <b>" + lab + "</b>");
+    ["away", "home"].forEach((side) => {
       const top = (g.players || []).filter((p) => p.abbr === g[side] && p[mk] && p[mk].rank)
         .sort((a, b) => a[mk].rank - b[mk].rank).slice(0, 3)
         .sort((a, b) => b[mk].prob - a[mk].prob);
-      if (top.length) L.push(ic + " <b>" + lab + "</b> " + top.map((p) => ligneJoueur(p, mk)).join(" · "));
+      if (top.length) L.push(" " + eq(g[side]) + " · " + top.map((p) => ligneJoueur(p, mk)).join(" · "));
     });
   }
   return L.join("\n");
+}
+
+// ---- collecte d'un marché sur tous les matchs, triée par % décroissant ----
+function rowsMarche(jeux, mk) {
+  const NK = { duo15: "duo15", trio15: "trio15", doubleChance: "double", tripleChance: "triple" };
+  const rows = [];
+  if (NK[mk]) {
+    const sep = (mk === "duo15" || mk === "trio15") ? " + " : " ou ";
+    jeux.forEach((g) => {
+      const cb = g.combos && ((g.combos.mixte && g.combos.mixte[NK[mk]]) || (g.combos.away && g.combos.away[NK[mk]]));
+      if (cb) rows.push({ prob: cb.prob, txt: esc(cb.members.map((x) => x.name).join(sep))
+        + " — " + eq(g.away) + " @ " + eq(g.home) });
+    });
+  } else if (OUTS_CHAMP[mk]) {
+    jeux.forEach((g) => (g[OUTS_CHAMP[mk]] || []).forEach((o) =>
+      rows.push({ prob: o.prob, txt: esc(o.name) + " · " + esc(o.mk) + " — "
+        + eq(g.away) + " @ " + eq(g.home) + "  <i>" + esc(court(o.why)) + "</i>" })));
+  } else {
+    jeux.forEach((g) => ["away", "home"].forEach((side) => {
+      (g.players || []).filter((p) => p.abbr === g[side] && p[mk] && p[mk].rank && p[mk].rank <= 2)
+        .forEach((p) => rows.push({ prob: p[mk].prob, news: p.news,
+          txt: esc(p.name) + " — " + eq(p.abbr) + " @ " + eq(p.opp) }));
+    }));
+  }
+  rows.sort((a, b) => b.prob - a.prob);
+  return rows;
+}
+
+// ---- 📊 CLASSEMENT : le marché de ton choix, % décroissant, sur boutons ----
+function blocClassement(date, jeux, mk) {
+  const code = Object.keys(MK_CODE).find((c) => MK_CODE[c] === mk) || "1";
+  const rows = rowsMarche(jeux, mk);
+  const L = ["📊 <b>CLASSEMENT — " + esc(MK_LIB[code] || mk) + "</b>",
+    "📅 " + esc(dateFr(date)) + " · " + jeux.length + " matchs · % décroissant", SEP];
+  if (!rows.length) {
+    L.push("Aucun pick sur ce marché — signaux trop faibles hors favoris.");
+  } else {
+    rows.slice(0, 14).forEach((r, i) => L.push(rang(i) + " <b>" + pct(r.prob) + "</b>  "
+      + r.txt + (r.news ? " 📰" : "")));
+  }
+  const pieges = jeux.filter((g) => g.piege);
+  if (pieges.length) {
+    L.push(SEP, "⚠️ <b>PIÈGES</b>");
+    pieges.forEach((g) => L.push(" " + eq(g.away) + " @ " + eq(g.home) + " — " + esc(g.piege)));
+  }
+  L.push("", "<i>Marché : boutons ci-dessous · 🔄 refresh = gardiens revérifiés</i>");
+  return L.join("\n");
+}
+const GROUPES_CLAS = [["1", "3", "2"], ["4", "6"], ["8", "9"], ["0"]];
+function kbClassement(etat, actif) {
+  const lignes = GROUPES_CLAS.map((gr) => gr.map((c) =>
+    btn((c === actif ? "▸ " : "") + MK_LIB[c], "Z:" + etat + ":" + c)));
+  lignes.push([btn("« Menu", "M:" + etat), btn("🔄 Refresh", "W:" + etat)]);
+  return { inline_keyboard: lignes };
 }
 
 // ---- liste globale : tous les matchs d'un coup, triée par % décroissant ----
@@ -746,39 +825,22 @@ const court = (t) => {
   return c.slice(0, c.lastIndexOf(" ")) + "…";
 };
 function blocGlobal(date, jeux, marches) {
-  const L = ["📅 <b>" + esc(date) + "</b> — " + jeux.length + " matchs · trié par %"];
-  const NK = { duo15: "duo15", trio15: "trio15", doubleChance: "double", tripleChance: "triple" };
+  const L = ["📅 <b>" + esc(dateFr(date)) + "</b> · " + jeux.length + " matchs · % décroissant"];
   for (const mk of marches) {
     const lab = (MARCHES.find((x) => x[0] === mk) || [mk, mk])[1].toUpperCase();
-    const rows = [];
-    if (NK[mk]) {
-      const sep = (mk === "duo15" || mk === "trio15") ? " + " : " ou ";
-      jeux.forEach((g) => {
-        const cb = g.combos && ((g.combos.mixte && g.combos.mixte[NK[mk]]) || (g.combos.away && g.combos.away[NK[mk]]));
-        if (cb) rows.push({ prob: cb.prob, txt: esc(cb.members.map((x) => x.name).join(sep)) + " — " + mLabel(g) });
-      });
-    } else if (OUTS_CHAMP[mk]) {
-      jeux.forEach((g) => (g[OUTS_CHAMP[mk]] || []).forEach((o) =>
-        rows.push({ prob: o.prob, txt: esc(o.name) + " (" + esc(o.mk) + ", " + mLabel(g) + ") — " + esc(court(o.why)) })));
-    } else {
-      jeux.forEach((g) => ["away", "home"].forEach((side) => {
-        (g.players || []).filter((p) => p.abbr === g[side] && p[mk] && p[mk].rank && p[mk].rank <= 2)
-          .forEach((p) => rows.push({ prob: p[mk].prob, news: p.news,
-            txt: esc(p.abbr) + " " + esc(p.name) + " (vs " + esc(p.opp || "?") + ")" }));
-      }));
-    }
-    rows.sort((a, b) => b.prob - a.prob);
+    const rows = rowsMarche(jeux, mk);
+    L.push("", "🎯 <b>" + lab + "</b>");
     if (rows.length) {
-      L.push("", "🎯 <b>" + lab + "</b>");
-      rows.slice(0, 14).forEach((r) => L.push(" " + pct(r.prob) + " — " + r.txt + (r.news ? " 📰" : "")));
-    } else if (OUTS_CHAMP[mk]) {
-      L.push("", "🎯 <b>" + lab + "</b> — pas d'outsider justifié (signaux trop faibles hors favoris)");
+      rows.slice(0, 14).forEach((r, i) => L.push(rang(i) + " <b>" + pct(r.prob) + "</b>  "
+        + r.txt + (r.news ? " 📰" : "")));
+    } else {
+      L.push(" Aucun pick justifié sur ce marché.");
     }
   }
   const pieges = jeux.filter((g) => g.piege);
   if (pieges.length) {
-    L.push("", "⚠️ <b>MATCHS PIÈGES</b>");
-    pieges.forEach((g) => L.push(" " + mLabel(g) + " — " + esc(g.piege)));
+    L.push("", SEP, "⚠️ <b>MATCHS PIÈGES</b>");
+    pieges.forEach((g) => L.push(" " + eq(g.away) + " @ " + eq(g.home) + " — " + esc(g.piege)));
   }
   return L.join("\n");
 }
@@ -806,7 +868,30 @@ function blocListe(date, jeux) {
     + "\n\nEx : « buteur match 1 », « outsider FLA », « tout pointeur »";
 }
 
+/* ---------- 🔄 refresh : gardiens revérifiés MAINTENANT, analyses réadaptées ---------- */
+async function fluxRefresh(d) {
+  const date = jourDefaut(d);
+  const jeux = await jourAdapte(date, d, true);
+  const gks = [];
+  jeux.forEach((g) => {
+    const ga = g.ctx && g.ctx.home ? g.ctx.home.goalie : null;
+    const gh = g.ctx && g.ctx.away ? g.ctx.away.goalie : null;
+    [[g.away, ga], [g.home, gh]].forEach(([ab, gk]) => {
+      if (gk && gk.estimated === false) gks.push(eq(ab) + " " + esc(gk.name));
+    });
+  });
+  const nAd = jeux.filter((g) => (g.adaptations || []).length).length;
+  return ["🔄 <b>ACTUALISÉ</b> — " + esc(dateFr(date)),
+    "🥅 " + (gks.length ? "<b>" + gks.length + " gardiens confirmés</b> (source Daily Faceoff, relu à l'instant) :\n "
+      + gks.slice(0, 10).join(" · ") + (gks.length > 10 ? " …" : "")
+      : "aucun gardien confirmé pour l'instant — les probables restent en place"),
+    "🧮 Analyses " + (nAd ? "réadaptées sur " + nAd + " match" + (nAd > 1 ? "s" : "")
+      : "à jour") + " avec ces gardiens.",
+    "", "<i>Le bot revérifie aussi tout seul toutes les 20 min dès que tu lui parles.</i>"].join("\n");
+}
+
 /* ---------- réponse complète ---------- */
+let CLAVIER_REP = null;   // clavier demandé par la réponse texte (ex. /classement)
 async function traite(text) {
   const d = await index();
   const gm = String(text || "").trim().match(/^\/?gardiens?\s*(.*)$/i);
@@ -815,6 +900,16 @@ async function traite(text) {
   if (bm) return fluxBilan(d, bm[2] || "");
   if (/^\/?(news|actus|actualites|actualités|infos)$/i.test(String(text || "").trim()))
     return fluxNews();
+  const tx = String(text || "").trim();
+  if (/^\/?(refresh|maj|rafrai?chi?r?|rafraîchir?)$/i.test(tx)) return await fluxRefresh(d);
+  const clm = tx.match(/^\/?(classement|ranking|classements)(?:\s+([\s\S]*))?$/i);
+  if (clm) {
+    const qc = parseRequete(clm[2] || "buteur", d);
+    const mk = (qc.marches || [])[0] || "buteur";
+    const date0 = qc.date && dates(d).includes(qc.date) ? qc.date : jourDefaut(d);
+    CLAVIER_REP = kbClassement(encodeEtat([], dates(d).indexOf(date0)), mk);
+    return [blocClassement(date0, await jourAdapte(date0, d), mk)];
+  }
   const q = parseRequete(text, d);
   const ds = dates(d);
   if (q.aide) return [AIDE];
@@ -934,6 +1029,18 @@ async function traiteCallback(data, d) {
   }
   if (cmd === "P") return { envoie: [blocPodium(date, await jourAdapte(date, d))], clavier: kbMenu(etat, d) };
   if (cmd === "K") return { edit: { texte: "📅 <b>Choisis un jour</b> :", clavier: kbJours(etat, d) } };
+  if (cmd === "C") {
+    const jeux = await jourAdapte(date, d);
+    return { envoie: [blocClassement(date, jeux, "buteur")], clavier: kbClassement(etat, "buteur") };
+  }
+  if (cmd === "Z") {
+    const jeux = await jourAdapte(date, d);
+    const mk = MK_CODE[extra] || "buteur";
+    return { edit: { texte: blocClassement(date, jeux, mk), clavier: kbClassement(etat, extra) } };
+  }
+  if (cmd === "W") {
+    return { envoie: await fluxRefresh(d), clavier: kbMenu(etat, d) };
+  }
   if (cmd === "D") return { edit: { texte: accueilTexte(d, etat), clavier: kbMenu(etat, d) } };
   return {};
 }
@@ -1301,7 +1408,8 @@ export default {
         return j(200, { ok: true, menu: true });
       }
       const morceaux = await traite(msg.text);
-      await envoie(msg.chat.id, morceaux);
+      const clav = CLAVIER_REP; CLAVIER_REP = null;
+      await envoie(msg.chat.id, morceaux, clav || undefined);
       return j(200, { ok: true, reponses: morceaux.length });
     } catch (e) {
       try { await envoie(msg.chat.id, ["❌ Erreur : " + esc(String((e && e.message) || e))]); } catch (e2) { /* tant pis */ }
