@@ -181,7 +181,21 @@ let WORKER;
     ok(set.textes.includes(topP[0].p.name) && set.textes.includes(pctT(topP[0].pP)),
       "adaptation : n°1 pointeur EXACT (formule passes) — " + topP[0].p.name + " " + pctT(topP[0].pP));
 
-    const duoLam = (topB[0].lamG + topB[1].lamG) * 0.85;   // corrélation coéquipiers
+    // le duo est MIXTE : les 2 meilleurs buteurs du match, toutes équipes —
+    // away recalculé avec le nouveau gardien, home inchangé.
+    const rowsAll = joueursDe(g.id).filter((p) => p.buteur && p.buteur.rank
+      && !(p.flags || []).includes("absent")).map((p) => {
+      if (p.abbr === g.away && p.lambdaSansGardien && !p.recrue) {
+        const ng = p.lambdaSansGardien.g * fN;
+        const gP = Math.round((1 - Math.exp(-ng)) * (CAL.buteur || 1) * 10000) / 10000;
+        const sG = jr1(100 * gP, 1);
+        return { lamG: jr1(ng, 3), sG,
+          cG: sG > 0 ? jr1(confT(gP, p.gp, p.flags || [], !!g.preseason), 1) : 0, name: p.name };
+      }
+      return { lamG: p.buteur.lam || 0, sG: p.buteur.score || 0, cG: p.buteur.confidence || 0, name: p.name };
+    });
+    rowsAll.sort((a, b) => b.cG - a.cG || b.sG - a.sG || (a.name < b.name ? -1 : 1));
+    const duoLam = (rowsAll[0].lamG + rowsAll[1].lamG) * 0.85;   // corrélation coéquipiers
     const duoPct = pctT(Math.round(poisT(duoLam, 2) * 0.75 * (CAL.duo15 || 1) * 10000) / 10000);
     const dq = await dire("duo match " + num);
     ok(dq.textes.includes(duoPct), "adaptation : duo 1,5 recalculé EXACT (" + duoPct + ")");
@@ -218,8 +232,8 @@ let WORKER;
   }
 
   const tp = await dire("top");
-  ok(tp.textes.includes("TOP DU JOUR") && tp.textes.includes("🥇") && tp.textes.includes("indice"),
-    "/top : top du jour structuré");
+  ok(tp.textes.includes("TOP DU JOUR") && tp.textes.includes("🥇") && tp.textes.includes("%"),
+    "/top : top du jour compact (% d'abord, sans étoiles)");
 
   // exactitude : top 3 buteur = tri par indice sur les joueurs du jour
   const rowsB = [];
@@ -235,8 +249,8 @@ let WORKER;
   const marq = top3B.filter((p) => p.buteur.valeur === "VALUE" || p.buteur.valeur === "SUR");
   if (marq.length) {
     const lig = tp.textes.split("\n").find((l) => l.includes(marq[0].name)) || "";
-    ok(lig.includes(marq[0].buteur.valeur === "VALUE" ? "🔥" : "✅"),
-      "top : étiquette " + marq[0].buteur.valeur + " visible sur " + marq[0].name);
+    ok(lig.includes(pctT(marq[0].buteur.prob)) && !/[★☆]/.test(lig),
+      "top : % visible et sans étoiles sur " + marq[0].name);
   } else {
     ok(true, "top : aucune étiquette attendue sur le top 3 buteur du jour");
   }

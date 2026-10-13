@@ -518,9 +518,9 @@ def run(raw):
             Marchés à seuils (2+/3+) : événements rares → indice plancher plus
             bas (30) mais au moins 2 étoiles au barème du marché."""
             est_seuil = mkt in SEUILS_MK
-            min_conf, need_pal = (45, 1)
+            min_conf, need_pal = (40, 1)
             if est_seuil:
-                min_conf, need_pal = (20 if mkt == "tripleButeur" else 30), 2
+                min_conf, need_pal = (20 if mkt == "tripleButeur" else 28), 2
             top3 = {p["id"] for m2 in ((mkt,) if mkt else ("buteur", "pointeur"))
                     for p in players if p[m2]["rank"] and p[m2]["rank"] <= 3}
             out = []
@@ -530,7 +530,7 @@ def run(raw):
                 mk = mkt or ("pointeur" if (p["pointeur"]["confidence"] or 0) >=
                              (p["buteur"]["confidence"] or 0) else "buteur")
                 conf = p[mk]["confidence"] or 0
-                if conf < min_conf or not p[mk]["rank"] or not (4 <= p[mk]["rank"] <= 12):
+                if conf < min_conf or not p[mk]["rank"] or not (4 <= p[mk]["rank"] <= 15):
                     continue
                 if est_seuil and (p[mk].get("palierRel") or 1) < need_pal:
                     continue
@@ -599,9 +599,11 @@ def run(raw):
         # Le pari passe si L'UN des joueurs marque. P(aucun ne marque) =
         # produit des (1 - p) individuels → probabilité combinée exacte.
         def _combo(side_abbr, n, mk_key, k=1):
+            # side_abbr=None → MIXTE : les n meilleurs buteurs du match, peu
+            # importe l'équipe (« l'un des n marque » se fiche du maillot).
             sel = sorted([p for p in players
-                          if p["abbr"] == side_abbr and "absent" not in p["flags"]
-                          and p["buteur"]["rank"]],
+                          if (side_abbr is None or p["abbr"] == side_abbr)
+                          and "absent" not in p["flags"] and p["buteur"]["rank"]],
                          key=lambda p: p["buteur"]["rank"])[:n]
             if len(sel) < n:
                 return None
@@ -638,13 +640,40 @@ def run(raw):
                          "duo15": _combo(g[side], 2, "duo15", k=2),
                          "trio15": _combo(g[side], 3, "trio15", k=2)}
                   for side in ("away", "home")}
+        combos["mixte"] = {"double": _combo(None, 2, "doubleChance"),
+                           "triple": _combo(None, 3, "tripleChance"),
+                           "duo15": _combo(None, 2, "duo15", k=2),
+                           "trio15": _combo(None, 3, "trio15", k=2)}
+
+        # ---------- match piège : le favori net joue dans de mauvaises conditions ----------
+        lam_tot = {sd: sum(p["buteur"]["lam"] or 0.0 for p in players
+                           if p["abbr"] == g[sd]) for sd in ("away", "home")}
+        fav = "away" if lam_tot["away"] >= lam_tot["home"] else "home"
+        ecart = (abs(lam_tot["away"] - lam_tot["home"])
+                 / max(lam_tot["away"], lam_tot["home"], 1e-9))
+        piege = None
+        if ecart >= 0.15:
+            risques = []
+            if ctx[fav]["b2b"]:
+                risques.append("back-to-back")
+            tops = [p["name"] for p in players
+                    if p["abbr"] == g[fav] and "absent" in p["flags"]
+                    and (p["buteur"].get("rank") or 99) <= 3]
+            if tops:
+                risques.append("sans " + " ni ".join(t.split()[-1] for t in tops[:2]))
+            gkf = (ctx[fav].get("goalie") or {}).get("sv") or 0.0
+            gko = (ctx["home" if fav == "away" else "away"].get("goalie") or {}).get("sv") or 0.0
+            if gkf and gko and gkf < gko - 0.008:
+                risques.append("gardien en dedans")
+            if risques:
+                piege = g[fav] + " favori mais " + " · ".join(risques)
 
         games_out.append({
             "id": g["id"], "date": g["date"], "startUtc": g["startUtc"],
             "gameType": g["gameType"], "preseason": preseason,
             "away": g["away"], "home": g["home"],
             "awayNameFr": ctx["away"]["nameFr"], "homeNameFr": ctx["home"]["nameFr"],
-            "venue": g.get("venue"), "ctx": ctx, "players": players,
+            "venue": g.get("venue"), "ctx": ctx, "players": players, "piege": piege,
             "compo": g.get("compo"), "outsiders": retenus,
             "outsidersButeur": outs_buteur, "outsidersPointeur": outs_pointeur,
             "outsidersDoubleButeur": outs_2b, "outsidersTripleButeur": outs_3b,
@@ -834,6 +863,28 @@ def player_record(p, ctx, sk_by_season, log, active, ref, career, lg_sh_pct,
     pp_share = (ppp / pts) if pts else 0.0
     ev_gpg = evg / gp
     sh_pct = (g / sh) if sh else None
+
+    # --- petit échantillon (début de saison) : régression vers la saison d'avant.
+    # 3 matchs ne font pas une moyenne : un défenseur à 3 buts en 3 matchs
+    # affichait « 1,0 but/match ». On pondère gp/(gp+10) pour la saison en cours,
+    # le complément vient de la saison de référence (≥ 20 matchs).
+    if gp < 10:
+        rs, rgp = {}, 0
+        for _sx in sorted((x for x in sk_by_season if x < active), reverse=True):
+            _cand = sk_by_season[_sx].get(p["id"]) or {}
+            if (_cand.get("gamesPlayed") or 0) >= 20:
+                rs, rgp = _cand, _cand["gamesPlayed"]
+                break
+        if rgp >= 20:
+            w = gp / (gp + 10.0)
+            gpg = w * gpg + (1 - w) * (rs.get("goals", 0) or 0) / rgp
+            apg = w * apg + (1 - w) * (rs.get("assists", 0) or 0) / rgp
+            ptg = w * ptg + (1 - w) * (rs.get("points", 0) or 0) / rgp
+            shpg = w * shpg + (1 - w) * (rs.get("shots", 0) or 0) / rgp
+            ev_gpg = w * ev_gpg + (1 - w) * (rs.get("evGoals", 0) or 0) / rgp
+            r_pts = rs.get("points", 0) or 0
+            if r_pts:
+                pp_share = w * pp_share + (1 - w) * (rs.get("ppPoints", 0) or 0) / r_pts
 
     # --- 1. régression de l'efficacité de tir ---
     car = career.get(p["id"], {})
