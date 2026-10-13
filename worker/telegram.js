@@ -78,6 +78,7 @@ const AIDE =
   "/demain — analyse de demain\n" +
   "/gardien — gardiens probables + corriger un partant\n" +
   "/bilan — 📊 mes résultats · « bilan hier » · « bilan 2026-10-05 » · « bilan semaine »\n" +
+  "/pick — 🎯 MES CHOIX : un nom par marché, direct\n" +
   "/classement — 📊 % décroissant, marché au choix par boutons\n" +
   "/refresh — 🔄 gardiens revérifiés + analyses réadaptées\n" +
   "/news — 📰 actus NHL en direct (blessures, compos)\n" +
@@ -159,7 +160,8 @@ function kbMenu(etat, d) {
     [btn("🏆 Podium", "P:" + etat), btn("🌟 Top du jour", "O:" + etat)],
     [btn("🥅 Gardiens", "Y:" + etat), btn("📅 " + date.slice(5).replace("-", "/"), "K:" + etat)],
     [btn("📊 Bilan", "B:" + etat), btn("❓ Aide", "A")],
-    [btn("📊 Classement %", "C:" + etat), btn("🔄 Refresh", "W:" + etat)],
+    [btn("🎯 Mes picks", "X:" + etat), btn("📊 Classement %", "C:" + etat)],
+    [btn("🔄 Refresh", "W:" + etat)],
   ] };
 }
 function kbFiltres(etat) {
@@ -771,17 +773,17 @@ function rowsMarche(jeux, mk) {
     const sep = (mk === "duo15" || mk === "trio15") ? " + " : " ou ";
     jeux.forEach((g) => {
       const cb = g.combos && ((g.combos.mixte && g.combos.mixte[NK[mk]]) || (g.combos.away && g.combos.away[NK[mk]]));
-      if (cb) rows.push({ prob: cb.prob, txt: esc(cb.members.map((x) => x.name).join(sep))
+      if (cb) rows.push({ prob: cb.prob, g, txt: esc(cb.members.map((x) => x.name).join(sep))
         + " — " + eq(g.away) + " @ " + eq(g.home) });
     });
   } else if (OUTS_CHAMP[mk]) {
     jeux.forEach((g) => (g[OUTS_CHAMP[mk]] || []).forEach((o) =>
-      rows.push({ prob: o.prob, txt: esc(o.name) + " · " + esc(o.mk) + " — "
+      rows.push({ prob: o.prob, g, txt: esc(o.name) + " · " + esc(o.mk) + " — "
         + eq(g.away) + " @ " + eq(g.home) + "  <i>" + esc(court(o.why)) + "</i>" })));
   } else {
     jeux.forEach((g) => ["away", "home"].forEach((side) => {
       (g.players || []).filter((p) => p.abbr === g[side] && p[mk] && p[mk].rank && p[mk].rank <= 2)
-        .forEach((p) => rows.push({ prob: p[mk].prob, news: p.news,
+        .forEach((p) => rows.push({ prob: p[mk].prob, news: p.news, g,
           txt: esc(p.name) + " — " + eq(p.abbr) + " @ " + eq(p.opp) }));
     }));
   }
@@ -794,7 +796,11 @@ function blocClassement(date, jeux, mk) {
   const code = Object.keys(MK_CODE).find((c) => MK_CODE[c] === mk) || "1";
   const rows = rowsMarche(jeux, mk);
   const L = ["📊 <b>CLASSEMENT — " + esc(MK_LIB[code] || mk) + "</b>",
-    "📅 " + esc(dateFr(date)) + " · " + jeux.length + " matchs · % décroissant", SEP];
+    "📅 " + esc(dateFr(date)) + " · " + jeux.length + " matchs · % décroissant"];
+  const r1 = rows[0];
+  if (r1) L.push("🎯 <b>MON PICK → " + r1.txt.replace(/\s*<i>[\s\S]*<\/i>/, "") + "  " + pct(r1.prob) + "</b>"
+    + (r1.prob >= 0.7 ? " ✅" : "") + (r1.g && r1.g.piege ? " ⚠️ <i>piège</i>" : ""));
+  L.push(SEP);
   if (!rows.length) {
     L.push("Aucun pick sur ce marché — signaux trop faibles hors favoris.");
   } else {
@@ -868,6 +874,37 @@ function blocListe(date, jeux) {
     + "\n\nEx : « buteur match 1 », « outsider FLA », « tout pointeur »";
 }
 
+/* ---------- 🎯 MES PICKS : un seul nom par marché — le choix, pas la liste ---------- */
+function fluxPick(date, jeux) {
+  if (!jeux.length) return ["Aucun match analysé le " + esc(dateFr(date)) + "."];
+  const L = ["🎯 <b>MES PICKS — " + esc(dateFr(date)) + "</b>",
+    "<i>Un nom par marché. Pas d'hésitation.</i>", SEP];
+  const defs = [["⚡", "buteur", "BUTEUR 1+"], ["📈", "pointeur", "POINTEUR 1+"],
+    ["✨", "doublePointeur", "2+ POINTS"], ["🎲", "doubleChance", "DOUBLE CHANCE"],
+    ["💎", "outsider", "OUTSIDER"]];
+  let n = 0;
+  defs.forEach(([ico, mk, lab]) => {
+    const rows = rowsMarche(jeux, mk);
+    if (!rows.length) return;
+    const r = rows[0];
+    const piege = r.g && r.g.piege;
+    n++;
+    L.push(ico + " <b>" + lab + "</b>");
+    L.push("   → <b>" + r.txt.replace(/\s*<i>[\s\S]*<\/i>/, "") + "</b>  <b>" + pct(r.prob) + "</b>"
+      + (r.prob >= 0.7 ? " ✅" : "") + (r.news ? " 📰" : "")
+      + (piege ? "  ⚠️ <i>match piège</i>" : ""));
+    if (rows.length > 1 && rows[1].prob >= r.prob - 0.06)
+      L.push("   <i>sinon</i> " + rows[1].txt.replace(/\s*<i>[\s\S]*<\/i>/, "") + "  " + pct(rows[1].prob));
+  });
+  if (!n) L.push("Rien d'assez solide ce soir — passe ton tour, c'est aussi un choix.");
+  else {
+    L.push(SEP);
+    L.push("✅ = 70 %+ · 📰 = actu blessure · ⚠️ = piège, mise réduite");
+    L.push("<i>Tout comparer : /classement · tout le détail : /buteur, /pointeur…</i>");
+  }
+  return [L.join("\n")];
+}
+
 /* ---------- 🔄 refresh : gardiens revérifiés MAINTENANT, analyses réadaptées ---------- */
 async function fluxRefresh(d) {
   const date = jourDefaut(d);
@@ -902,6 +939,10 @@ async function traite(text) {
     return fluxNews();
   const tx = String(text || "").trim();
   if (/^\/?(refresh|maj|rafrai?chi?r?|rafraîchir?)$/i.test(tx)) return await fluxRefresh(d);
+  if (/^\/?(pick|picks|monpick|mespicks?|choix)$/i.test(tx)) {
+    const dateP = jourDefaut(d);
+    return fluxPick(dateP, await jourAdapte(dateP, d));
+  }
   const clm = tx.match(/^\/?(classement|ranking|classements)(?:\s+([\s\S]*))?$/i);
   if (clm) {
     const qc = parseRequete(clm[2] || "buteur", d);
@@ -1029,6 +1070,10 @@ async function traiteCallback(data, d) {
   }
   if (cmd === "P") return { envoie: [blocPodium(date, await jourAdapte(date, d))], clavier: kbMenu(etat, d) };
   if (cmd === "K") return { edit: { texte: "📅 <b>Choisis un jour</b> :", clavier: kbJours(etat, d) } };
+  if (cmd === "X") {
+    const jeux = await jourAdapte(date, d);
+    return { envoie: fluxPick(date, jeux), clavier: kbMenu(etat, d) };
+  }
   if (cmd === "C") {
     const jeux = await jourAdapte(date, d);
     return { envoie: [blocClassement(date, jeux, "buteur")], clavier: kbClassement(etat, "buteur") };

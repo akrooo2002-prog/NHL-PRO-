@@ -231,6 +231,10 @@ let WORKER;
     ok(!q2p.textes.includes("OUTSIDER 2+ POINTS"), "outsider 2+ points : aucun ce jour → pas de bloc");
   }
 
+  const pk = await dire("pick");
+  ok(pk.morceaux === 1 && pk.textes.includes("MES PICKS") && pk.textes.includes("BUTEUR 1+")
+     && pk.textes.includes("%") && !/[★☆]/.test(pk.textes),
+    "/pick : mes choix en un coup d'œil (1 message, % sans étoiles)");
   const tp = await dire("top");
   ok(tp.textes.includes("TOP DU JOUR") && tp.textes.includes("🥇") && tp.textes.includes("%"),
     "/top : top du jour compact (% d'abord, sans étoiles)");
