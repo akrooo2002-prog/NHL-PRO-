@@ -487,17 +487,21 @@ function effG(game){
       const ng=p.lambdaSansGardien.g*nouveau;
       const na=(p.lambdaSansGardien.a-2*0.30*p.lambda.g)*nouveau+2*0.30*ng;
       p.buteur.lam=ng; p.passeur.lam=na; p.pointeur.lam=ng+na;
-      p.buteur.prob=1-Math.exp(-ng); p.passeur.prob=1-Math.exp(-na);
-      p.pointeur.prob=1-Math.exp(-(ng+na));
+      const CAL=(S.d&&S.d.calib)||{};
+      p.buteur.prob=Math.round((1-Math.exp(-ng))*(CAL.buteur||1)*10000)/10000;
+      p.passeur.prob=Math.round((1-Math.exp(-na))*(CAL.passeur||1)*10000)/10000;
+      p.pointeur.prob=Math.round((1-Math.exp(-(ng+na)))*(CAL.pointeur||1)*10000)/10000;
       if(p.doubleButeur){
         const lp=ng+na;
         const pq=(lam,k)=>{let q=0,t=Math.exp(-lam);for(let i=0;i<k;i++){q+=t;t*=lam/(i+1);}return Math.max(0,1-q);};
         p.doubleButeur.lam=ng; p.tripleButeur.lam=ng;
         p.doublePointeur.lam=lp; p.triplePointeur.lam=lp;
-        p.doubleButeur.prob=Math.round(pq(ng,2)*10000)/10000;
-        p.tripleButeur.prob=Math.round(pq(ng,3)*10000)/10000;
-        p.doublePointeur.prob=Math.round(pq(lp,2)*10000)/10000;
-        p.triplePointeur.prob=Math.round(pq(lp,3)*10000)/10000;
+        const BS={doubleButeur:0.030,tripleButeur:0.005,doublePointeur:0.120,triplePointeur:0.025};
+        const seuil=(lam,k,mk)=>Math.round((0.5*pq(lam,k)+0.5*BS[mk])*(CAL[mk]||1)*10000)/10000;
+        p.doubleButeur.prob=seuil(ng,2,"doubleButeur");
+        p.tripleButeur.prob=seuil(ng,3,"tripleButeur");
+        p.doublePointeur.prob=seuil(lp,2,"doublePointeur");
+        p.triplePointeur.prob=seuil(lp,3,"triplePointeur");
       }
       p.goalieF=nouveau; p.oppGoalie=gk.name;
     });
@@ -536,6 +540,9 @@ function effG(game){
       p[mk].score=Math.round(100*p[mk].prob*10)/10;
       let pal=1;
       for(const [seuil,n] of BM[mk]){ if(p[mk].score>=seuil){pal=n;break;} }
+      let pabs=1;
+      for(const [seuil,n] of ((S.d&&S.d.palAbs)||[[70,5],[52,4],[36,3],[20,2],[0,1]])){ if(p[mk].score>=seuil){pabs=n;break;} }
+      pal=Math.min(pal,pabs);
       if(p.recrue) pal=Math.min(2,pal);
       p[mk].palier=pal; p[mk].etoiles=etoiles(pal);
       if(!p.recrue&&p[mk].score>0)

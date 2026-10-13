@@ -137,6 +137,7 @@ let WORKER;
   };
   const jr1 = (x, nd) => { const f = Math.pow(10, nd); return Math.floor(x * f + 0.5) / f; };
   const poisT = (lam, k) => { if (lam <= 0) return 0; let s2 = 0, t = Math.exp(-lam); for (let i = 0; i < k; i++) { s2 += t; t *= lam / (i + 1); } return Math.max(0, 1 - s2); };
+  const CAL = INDEX.calib || {};   // facteurs d'auto-calibrage publiés par le moteur
 
   // un match du jour par défaut avec un gardien remplaçant DIFFÉRENT du probable
   const jd = JSON.parse(fs.readFileSync(path.join(__dirname, "dist/data/jour-" + defaut + ".json"), "utf8"));
@@ -160,8 +161,8 @@ let WORKER;
       const ng = p.lambdaSansGardien.g * fN;
       const naL = (p.lambdaSansGardien.a - 0.6 * p.lambda.g) * fN + 0.6 * ng;
       const np = ng + naL;
-      const gP = Math.round((1 - Math.exp(-ng)) * 10000) / 10000;
-      const pP = Math.round((1 - Math.exp(-np)) * 10000) / 10000;
+      const gP = Math.round((1 - Math.exp(-ng)) * (CAL.buteur || 1) * 10000) / 10000;
+      const pP = Math.round((1 - Math.exp(-np)) * (CAL.pointeur || 1) * 10000) / 10000;
       const sG = jr1(100 * gP, 1), sP = jr1(100 * pP, 1);
       return { p, gP, pP, sG, sP, lamG: jr1(ng, 3),
         cG: sG > 0 ? jr1(confT(gP, p.gp, p.flags || [], !!g.preseason), 1) : 0,
@@ -180,8 +181,8 @@ let WORKER;
     ok(set.textes.includes(topP[0].p.name) && set.textes.includes(pctT(topP[0].pP)),
       "adaptation : n°1 pointeur EXACT (formule passes) — " + topP[0].p.name + " " + pctT(topP[0].pP));
 
-    const duoLam = topB[0].lamG + topB[1].lamG;
-    const duoPct = pctT(Math.round(poisT(duoLam, 2) * 10000) / 10000);
+    const duoLam = (topB[0].lamG + topB[1].lamG) * 0.85;   // corrélation coéquipiers
+    const duoPct = pctT(Math.round(poisT(duoLam, 2) * 0.75 * (CAL.duo15 || 1) * 10000) / 10000);
     const dq = await dire("duo match " + num);
     ok(dq.textes.includes(duoPct), "adaptation : duo 1,5 recalculé EXACT (" + duoPct + ")");
 
@@ -276,7 +277,7 @@ let WORKER;
     if (!p.lambdaSansGardien || p.recrue)
       return { p, prob: p.buteur.prob, score: p.buteur.score, conf: p.buteur.confidence };
     const ng = p.lambdaSansGardien.g * fNA;
-    const prob = Math.round((1 - Math.exp(-ng)) * 10000) / 10000;
+    const prob = Math.round((1 - Math.exp(-ng)) * (CAL.buteur || 1) * 10000) / 10000;
     const score = jr1(100 * prob, 1);
     return { p, prob, score, conf: score > 0 ? jr1(confT(prob, p.gp, p.flags || [], !!gjeu.preseason), 1) : 0 };
   });

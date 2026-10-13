@@ -135,11 +135,67 @@ BAREMES = {"doubleButeur": [(8, 5), (5, 4), (2.5, 3), (1, 2), (0, 1)],
            "trio15": [(50, 5), (40, 4), (30, 3), (20, 2), (0, 1)]}
 
 
-def palier_bareme(score, mk):
+# ---- étoiles honnêtes : le barème d'un marché classe à l'intérieur du marché,
+# il ne doit jamais transformer un événement à 12 % en « 5 étoiles ».
+# Plafond ABSOLU : les étoiles suivent la probabilité réelle du pick.
+PAL_ABS = [(70, 5), (52, 4), (36, 3), (20, 2), (0, 1)]
+
+
+def palier_abs(prob_pct):
+    for seuil, n in PAL_ABS:
+        if prob_pct >= seuil:
+            return n
+    return 1
+
+
+def palier_bareme_rel(score, mk):
+    """Palier RELATIF du marché (classement interne, non plafonné)."""
     for seuil, n in BAREMES[mk]:
         if score >= seuil:
             return n
     return 1
+
+
+def palier_bareme(score, mk):
+    return min(palier_bareme_rel(score, mk), palier_abs(score))
+
+
+# ---- auto-calibrage empirique : le moteur lit SES PROPRES résultats vérifiés
+# (data/verifs.json, téléchargé depuis le worker par fetch_pronos.py) et
+# corrige les probabilités marché par marché :
+#   f = (touches observées + 8) / (touches attendues + 8), borné [0.55 ; 1.35].
+# Le pseudo-compte 8 évite de surréagir aux petits échantillons ; plus les
+# picks vérifiés s'accumulent, plus f converge vers fréquence réelle / modèle.
+BASE_SEUIL = {"doubleButeur": 0.030, "tripleButeur": 0.005,
+              "doublePointeur": 0.120, "triplePointeur": 0.025}
+CALIB_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                          "data", "verifs.json")
+_CALIB = None
+
+
+def facteurs_calibrage():
+    global _CALIB
+    if _CALIB is None:
+        _CALIB = {}
+        try:
+            with open(CALIB_FILE, encoding="utf-8") as fh:
+                verifs = json.load(fh)
+        except Exception:
+            verifs = []
+        par = {}
+        for v in verifs:
+            mk = v.get("mk")
+            if mk and v.get("prob") is not None and v.get("hit") is not None:
+                par.setdefault(mk, []).append(v)
+        for mk, ps in par.items():
+            touches = sum(1 for v in ps if v["hit"])
+            attendues = sum(float(v["prob"]) for v in ps)
+            _CALIB[mk] = max(0.55, min(1.35, (touches + 8.0) / (attendues + 8.0)))
+    return _CALIB
+
+
+def calib(mk):
+    return facteurs_calibrage().get(mk, 1.0)
 
 
 def seuils_markets(rec, lam_g, lam_p, log, cap=None):
@@ -147,9 +203,13 @@ def seuils_markets(rec, lam_g, lam_p, log, cap=None):
     marchés simples : cohérence garantie entre « 1+ but » et « 2+ buts »)."""
     for mk, (k, base) in SEUILS_MK.items():
         lam = lam_g if base == "g" else lam_p
-        prob = round(poisson_geq(lam, k), 4)
+        # la queue de Poisson surestime les événements rares (les buts d'une
+        # équipe se concentrent sur les mêmes matchs) : mélange 50/50 avec le
+        # taux réel NHL, puis facteur empirique du marché.
+        prob = round((0.5 * poisson_geq(lam, k) + 0.5 * BASE_SEUIL[mk]) * calib(mk), 4)
         score = js_round(100 * prob, 1)
-        pal = palier_bareme(score, mk)
+        pal_rel = palier_bareme_rel(score, mk)   # classement interne du marché
+        pal = min(pal_rel, palier_abs(score))    # étoiles = probabilité réelle
         if cap:
             pal = min(cap, pal)
         deja = n_log = 0
@@ -162,7 +222,8 @@ def seuils_markets(rec, lam_g, lam_p, log, cap=None):
         if n_log:
             why += f" Réalisé {deja} fois sur les {n_log} derniers matchs."
         rec[mk] = {"score": score, "prob": prob, "lam": round(lam, 3),
-                   "confidence": 0.0, "palier": pal, "etoiles": etoiles(pal),
+                   "confidence": 0.0, "palier": pal, "palierRel": pal_rel,
+                   "etoiles": etoiles(pal),
                    "rank": None, "why": why, "logHit": {"deja": deja, "n": n_log}}
 
 
@@ -471,7 +532,7 @@ def run(raw):
                 conf = p[mk]["confidence"] or 0
                 if conf < min_conf or not p[mk]["rank"] or not (4 <= p[mk]["rank"] <= 12):
                     continue
-                if est_seuil and (p[mk].get("palier") or 1) < need_pal:
+                if est_seuil and (p[mk].get("palierRel") or 1) < need_pal:
                     continue
                 bits = []
                 f5 = p["form"] or {}
@@ -499,10 +560,21 @@ def run(raw):
                                     + str(lh["n"]) + " derniers matchs")
                 if not bits:
                     continue
+                # biais du vainqueur : un outsider est CHOISI sur des signaux
+                # récents (forme, h2h) qui régressent vers la moyenne → le
+                # facteur empirique « outsider » s'applique en plus du marché.
+                g_out = max(0.6, min(1.3, calib("outsider" + mk[0].upper() + mk[1:])
+                                     / max(calib(mk), 1e-9)))
+                prob_o = round((p[mk]["prob"] or 0.0) * g_out, 4)
+                conf_o = js_round(conf * g_out ** 0.55, 1)
+                pal_o = (palier_bareme(prob_o * 100, mk) if mk in SEUILS_MK
+                         else palier(conf_o))
+                if p.get("recrue"):
+                    pal_o = min(pal_o, 2)
                 out.append({"id": p["id"], "name": p["name"], "abbr": p["abbr"],
                             "mk": MK_FR.get(mk, mk), "rank": p[mk]["rank"],
-                            "prob": p[mk]["prob"], "confidence": conf,
-                            "palier": p[mk]["palier"], "etoiles": p[mk]["etoiles"],
+                            "prob": prob_o, "confidence": conf_o,
+                            "palier": pal_o, "etoiles": etoiles(pal_o),
                             "valeur": p[mk].get("valeur") or "PROBABLE",
                             "why": " ; ".join(bits[:2]) + "."})
             out.sort(key=lambda x: -x["confidence"])
@@ -537,12 +609,17 @@ def run(raw):
                 p_aucun = 1.0
                 for p in sel:
                     p_aucun *= 1.0 - (p["buteur"]["prob"] or 0.0)
-                prob = round(1.0 - p_aucun, 4)
+                # les buts des coéquipiers sont corrélés (mêmes lignes, mêmes
+                # supériorités, même match) : l'indépendance surestime l'union.
+                prob = (1.0 - p_aucun) * (0.95 if n == 2 else 0.88)
             else:
                 # duo/trio « 1,5 buts » : les buts des n joueurs se somment
                 # (loi de Poisson), le pari passe dès 2 buts cumulés.
-                lam = sum(p["buteur"]["lam"] or 0.0 for p in sel)
-                prob = round(poisson_geq(lam, k), 4)
+                # λ minoré + décote queue : les soirées sans but existent.
+                lam = sum(p["buteur"]["lam"] or 0.0 for p in sel) * 0.85
+                prob = poisson_geq(lam, k) * 0.75
+            prob = round(prob * calib({"doubleChance": "duo",
+                                       "tripleChance": "trio"}.get(mk_key, mk_key)), 4)
             pc100 = prob * 100.0
             pal = palier_bareme(pc100, mk_key)
             conf = js_round(0.6 * sum(p["buteur"]["confidence"] or 0 for p in sel) / n
@@ -583,6 +660,7 @@ def run(raw):
                    "gfPerGame": round(gf_avg, 2), "pkPctAvg": round(pk_avg, 2)},
         "teams": tindex, "goalies": goalies, "goalieList": goalie_list,
         "games": games_out, "paliers": PALIERS, "baremes": BAREMES,
+        "palAbs": PAL_ABS, "calib": facteurs_calibrage(),
     }
     return out
 
@@ -718,7 +796,7 @@ def rookie_record(p, ctx, land, bio, lg_sh_pct, preseason):
     }
     for kind in ("buteur", "passeur", "pointeur"):  # marchés de la recrue
         lam = rec["lambda"][{"buteur": "g", "passeur": "a", "pointeur": "pts"}[kind]]
-        prob = round(1 - math.exp(-lam), 4)
+        prob = round((1 - math.exp(-lam)) * calib(kind), 4)
         rec[kind] = {"score": js_round(100 * prob, 1), "prob": prob,
                      "lam": round(lam, 3), "confidence": conf,
                      "palier": palier(conf), "etoiles": etoiles(palier(conf)),
@@ -880,9 +958,9 @@ def player_record(p, ctx, sk_by_season, log, active, ref, career, lg_sh_pct,
     lam_a_nog = (lam_a - 2 * 0.30 * lam_g) / ctx["goalieF"] + 2 * 0.30 * lam_g \
         if ctx["goalieF"] else lam_a
 
-    prob_g = 1 - math.exp(-lam_g)
-    prob_a = 1 - math.exp(-lam_a)
-    prob_p = 1 - math.exp(-lam_p)
+    prob_g = (1 - math.exp(-lam_g)) * calib("buteur")
+    prob_a = (1 - math.exp(-lam_a)) * calib("passeur")
+    prob_p = (1 - math.exp(-lam_p)) * calib("pointeur")
 
     msG, nxtG, gapG = msG0, nxtG0, gapG0
     msA, nxtA, gapA = msA0, nxtA0, gapA0

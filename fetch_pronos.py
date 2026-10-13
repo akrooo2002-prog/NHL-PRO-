@@ -367,6 +367,20 @@ def _norme(s):
 ESPN_INJ = "https://site.api.espn.com/apis/site/v2/sports/hockey/nhl/injuries"
 
 
+def worker_verifs():
+    """Télécharge les picks déjà vérifiés par le bot (KV du worker) : le moteur
+    s'en sert pour auto-calibrer ses probabilités marché par marché."""
+    try:
+        r = get("https://nhl-telegram-bot.akro-nhl-pronos.workers.dev/verifs", tries=2)
+        picks = (r or {}).get("picks") or []
+        if picks:
+            with open(os.path.join(OUT, "verifs.json"), "w", encoding="utf-8") as fh:
+                json.dump(picks, fh, ensure_ascii=False)
+            print(f"     calibrage : {len(picks)} picks vérifiés téléchargés du bot")
+    except Exception as e:
+        print(f"     calibrage indisponible ({e}) — dernier verifs.json conservé")
+
+
 def espn_blesses(payload):
     """Blessés/incertains (ESPN, sans clé) → {ABBR: [{name,status,comment,mult}]}.
     IR/Out = absent (λ ×0,10) · Day-To-Day/Questionable = doute (λ ×0,65)."""
@@ -484,6 +498,7 @@ def main(argv=None):
     payload["overrides"] = dailyfaceoff_overrides(payload)
     print("     blessés (ESPN)…")
     payload["newsBlesses"] = espn_blesses(payload)
+    worker_verifs()
     path = os.path.join(OUT, "pronos.json")
     with open(path, "w") as fh:
         json.dump(payload, fh, separators=(",", ":"))

@@ -221,7 +221,12 @@ function valeurLab(p, conf, rank) {
   return "PROBABLE";
 }
 function palierDe(c, paliers) { for (const [seuil, n] of paliers) if (c >= seuil) return n; return 1; }
-function baremeDe(score, mk, baremes) { for (const [seuil, n] of (baremes[mk] || [])) if (score >= seuil) return n; return 1; }
+function baremeDeRel(score, mk, baremes) { for (const [seuil, n] of (baremes[mk] || [])) if (score >= seuil) return n; return 1; }
+// étoiles honnêtes : un événement à 12 % ne vaut jamais 5 étoiles — plafond absolu
+const PAL_ABS_DEF = [[70, 5], [52, 4], [36, 3], [20, 2], [0, 1]];
+function palierAbs(pc100) { for (const [seuil, n] of PAL_ABS_DEF) if (pc100 >= seuil) return n; return 1; }
+function baremeDe(score, mk, baremes) { return Math.min(baremeDeRel(score, mk, baremes), palierAbs(score)); }
+const BASE_SEUIL = { doubleButeur: 0.030, tripleButeur: 0.005, doublePointeur: 0.120, triplePointeur: 0.025 };
 // même indice que engine.py : 80 % la probabilité du marché, 20 % la fiabilité des données.
 function confidenceFr(prob, gp, flags, preseason) {
   const cRank = 100 * Math.pow(Math.max(0, Math.min(1, prob)), 0.55);
@@ -327,6 +332,7 @@ async function retireGardien(date, team) {
 function adapteMatch(m, ov, d) {
   const paliers = d.paliers || PALIERS_DEF;
   const baremes = d.baremes || BAREMES_DEF;
+  const calib = d.calib || {};   // facteurs empiriques publiés par le moteur
   const svMoy = (d.league && d.league.savePctAvg) || 0.8945;
   const preseason = !!m.preseason;
   m.adaptations = [];
@@ -348,7 +354,7 @@ function adapteMatch(m, ov, d) {
       p.goalieF = fNouv; p.oppGoalie = o.name;
       [["buteur", ng], ["passeur", na], ["pointeur", np]].forEach(([mk, lam]) => {
         const rec = p[mk]; if (!rec) return;
-        rec.prob = Math.round((1 - Math.exp(-lam)) * 10000) / 10000;
+        rec.prob = Math.round((1 - Math.exp(-lam)) * (calib[mk] || 1) * 10000) / 10000;
         rec.lam = jsRound(lam, 3);
         rec.score = jsRound(100 * rec.prob, 1);
         if (rec.score > 0) {
@@ -361,10 +367,11 @@ function adapteMatch(m, ov, d) {
       [["doubleButeur", ng, 2], ["tripleButeur", ng, 3],
        ["doublePointeur", np, 2], ["triplePointeur", np, 3]].forEach(([mk, lam, k]) => {
         const rec = p[mk]; if (!rec) return;
-        rec.prob = Math.round(poissonGeq(lam, k) * 10000) / 10000;
+        rec.prob = Math.round((0.5 * poissonGeq(lam, k) + 0.5 * BASE_SEUIL[mk]) * (calib[mk] || 1) * 10000) / 10000;
         rec.lam = jsRound(lam, 3);
         rec.score = jsRound(100 * rec.prob, 1);
         if (rec.score > 0) rec.confidence = jsRound(confidenceFr(rec.prob, p.gp, p.flags || [], preseason), 1);
+        rec.palierRel = baremeDeRel(rec.score, mk, baremes);
         rec.palier = baremeDe(rec.score, mk, baremes);
         rec.etoiles = etoilesDe(rec.palier);
         rec.rank = null;
@@ -388,20 +395,21 @@ function adapteMatch(m, ov, d) {
    "triplePointeur"].forEach((mk) => {
     m.players.forEach((p) => { if (p[mk]) p[mk].valeur = valeurLab(p, p[mk].confidence, p[mk].rank); });
   });
-  m.outsiders = outsidersDe(m, null);
-  m.outsidersButeur = outsidersDe(m, "buteur");
-  m.outsidersPointeur = outsidersDe(m, "pointeur");
-  m.outsidersDoubleButeur = outsidersDe(m, "doubleButeur");
-  m.outsidersTripleButeur = outsidersDe(m, "tripleButeur");
-  m.outsidersDoublePointeur = outsidersDe(m, "doublePointeur");
-  m.outsidersTriplePointeur = outsidersDe(m, "triplePointeur");
+  const octx = { calib, baremes, paliers };
+  m.outsiders = outsidersDe(m, null, octx);
+  m.outsidersButeur = outsidersDe(m, "buteur", octx);
+  m.outsidersPointeur = outsidersDe(m, "pointeur", octx);
+  m.outsidersDoubleButeur = outsidersDe(m, "doubleButeur", octx);
+  m.outsidersTripleButeur = outsidersDe(m, "tripleButeur", octx);
+  m.outsidersDoublePointeur = outsidersDe(m, "doublePointeur", octx);
+  m.outsidersTriplePointeur = outsidersDe(m, "triplePointeur", octx);
   m.combos = {};
   [["away", m.away], ["home", m.home]].forEach(([side, ab]) => {
     m.combos[side] = {
-      double: comboDe(m, ab, 2, "doubleChance", 1, baremes),
-      triple: comboDe(m, ab, 3, "tripleChance", 1, baremes),
-      duo15: comboDe(m, ab, 2, "duo15", 2, baremes),
-      trio15: comboDe(m, ab, 3, "trio15", 2, baremes),
+      double: comboDe(m, ab, 2, "doubleChance", 1, baremes, calib),
+      triple: comboDe(m, ab, 3, "tripleChance", 1, baremes, calib),
+      duo15: comboDe(m, ab, 2, "duo15", 2, baremes, calib),
+      trio15: comboDe(m, ab, 3, "trio15", 2, baremes, calib),
     };
   });
   return m;
@@ -409,7 +417,8 @@ function adapteMatch(m, ov, d) {
 // outsiders : port exact de _outsiders() d'engine.py (marchés à seuils inclus)
 const SEUILS_OUTS = ["doubleButeur", "tripleButeur", "doublePointeur", "triplePointeur"];
 const MK_FR_OUTS = { doubleButeur: "2+ buts", tripleButeur: "3+ buts", doublePointeur: "2+ points", triplePointeur: "3+ points" };
-function outsidersDe(m, mkt) {
+function outsidersDe(m, mkt, octx) {
+  const { calib, baremes, paliers } = octx || {};
   const estSeuil = SEUILS_OUTS.includes(mkt);
   let minConf = 45, needPal = 1;
   if (estSeuil) { minConf = mkt === "tripleButeur" ? 20 : 30; needPal = 2; }
@@ -424,7 +433,7 @@ function outsidersDe(m, mkt) {
     const mk = mkt || ((p.pointeur.confidence || 0) >= (p.buteur.confidence || 0) ? "pointeur" : "buteur");
     const conf = p[mk].confidence || 0;
     if (conf < minConf || !p[mk].rank || p[mk].rank < 4 || p[mk].rank > 12) continue;
-    if (estSeuil && (p[mk].palier || 1) < needPal) continue;
+    if (estSeuil && (p[mk].palierRel || p[mk].palier || 1) < needPal) continue;
     const bits = [];
     const f5 = p.form || {}, pg = p.perGame || {};
     if ((f5.n || 0) >= 3 && (f5.pts || 0) >= Math.max(0.6, (pg.pts || 0) * 1.25))
@@ -446,8 +455,15 @@ function outsidersDe(m, mkt) {
         bits.push("a déjà signé " + k + "+ " + unite + " " + lh.deja + " fois sur ses " + lh.n + " derniers matchs");
     }
     if (!bits.length) continue;
+    const c = (octx || {}).calib || {};
+    const gOut = Math.max(0.6, Math.min(1.3, (c["outsider" + mk[0].toUpperCase() + mk.slice(1)] || 1)
+      / Math.max(c[mk] || 1, 1e-9)));
+    const probO = Math.round((p[mk].prob || 0) * gOut * 10000) / 10000;
+    const confO = jsRound(conf * Math.pow(gOut, 0.55), 1);
+    const palO = estSeuil ? baremeDe(probO * 100, mk, (octx || {}).baremes || BAREMES_DEF)
+                          : palierDe(confO, (octx || {}).paliers || PALIERS_DEF);
     out.push({ id: p.id, name: p.name, abbr: p.abbr, mk: MK_FR_OUTS[mk] || mk, rank: p[mk].rank,
-      prob: p[mk].prob, confidence: conf, palier: p[mk].palier, etoiles: p[mk].etoiles,
+      prob: probO, confidence: confO, palier: palO, etoiles: etoilesDe(palO),
       valeur: p[mk].valeur || "PROBABLE", why: bits.slice(0, 2).join(" ; ") + "." });
   }
   out.sort((a, b) => b.confidence - a.confidence);
@@ -461,7 +477,7 @@ function outsidersDe(m, mkt) {
   return retenus;
 }
 // combos : port exact de _combo() d'engine.py
-function comboDe(m, sideAbbr, n, mkKey, k, baremes) {
+function comboDe(m, sideAbbr, n, mkKey, k, baremes, calib) {
   const sel = m.players.filter((p) => p.abbr === sideAbbr && !(p.flags || []).includes("absent")
     && p.buteur && p.buteur.rank)
     .sort((a, b) => a.buteur.rank - b.buteur.rank).slice(0, n);
@@ -470,11 +486,15 @@ function comboDe(m, sideAbbr, n, mkKey, k, baremes) {
   if (k === 1) {
     let paucun = 1;
     sel.forEach((p) => { paucun *= 1 - (p.buteur.prob || 0); });
-    prob = Math.round((1 - paucun) * 10000) / 10000;
+    // buts de coéquipiers corrélés : l'indépendance surestime l'union
+    prob = (1 - paucun) * (n === 2 ? 0.95 : 0.88);
   } else {
-    const lam = sel.reduce((som, p) => som + (p.buteur.lam || 0), 0);
-    prob = Math.round(poissonGeq(lam, k) * 10000) / 10000;
+    // λ minoré + décote queue : les soirées sans but existent
+    const lam = sel.reduce((som, p) => som + (p.buteur.lam || 0), 0) * 0.85;
+    prob = poissonGeq(lam, k) * 0.75;
   }
+  const cleCal = { doubleChance: "duo", tripleChance: "trio" }[mkKey] || mkKey;
+  prob = Math.round(prob * (((calib || {})[cleCal]) || 1) * 10000) / 10000;
   const pc100 = prob * 100;
   const pal = baremeDe(pc100, mkKey, baremes);
   const conf = jsRound(0.6 * sel.reduce((som, p) => som + (p.buteur.confidence || 0), 0) / n + 0.4 * pc100, 1);
@@ -1169,6 +1189,20 @@ export default {
   async fetch(request, env, ctx) {
     ENV = env || {};
     if (request.method === "GET") {
+      const u = new URL(request.url);
+      if (u.pathname === "/verifs" && ENV.GARDIENS) {
+        const picks = [];
+        let cursor;
+        do {
+          const l = await ENV.GARDIENS.list({ prefix: "result:", limit: 1000, cursor });
+          for (const key of l.keys) {
+            const v = await ENV.GARDIENS.get(key.name, "json").catch(() => null);
+            for (const p of ((v && v.picks) || [])) picks.push(Object.assign({ jour: key.name.slice(7) }, p));
+          }
+          cursor = l.list_complete ? undefined : l.cursor;
+        } while (cursor);
+        return j(200, { picks });
+      }
       return j(200, { ok: true, bot: !!TOKEN(), donnees: DATA });
     }
     if (request.method !== "POST") return j(405, { ok: false });
