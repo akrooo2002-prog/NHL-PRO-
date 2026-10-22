@@ -235,9 +235,12 @@ let WORKER;
   ok(rf.morceaux >= 1 && rf.textes.includes("ACTUALISÉ") && !rf.textes.includes("Erreur"),
     "/refresh : réponse propre (bug forEach corrigé)");
   const cb = await dire("combi");
-  ok(cb.morceaux === 1 && cb.textes.includes("COMBINÉS") && cb.textes.includes("COMBINÉ SÛR")
-     && cb.textes.includes("MYMATCH") && !/[★☆]/.test(cb.textes),
-    "/combi : combinés + MyMatch en 1 message");
+  ok(cb.morceaux === 1 && cb.textes.includes("COMBINÉS")
+     && cb.textes.includes("PROFIL SÛR") && cb.textes.includes("PROFIL ÉQUILIBRÉ")
+     && cb.textes.includes("PROFIL JACKPOT") && cb.textes.includes("×3")
+     && cb.textes.includes("TIRS CADRÉS") && cb.textes.includes("MYMATCH")
+     && !/[★☆]/.test(cb.textes),
+    "/combi : 3 profils ×2/×3/×5 + tirs + MyMatch en 1 message");
   const pk = await dire("pick");
   ok(pk.morceaux === 1 && pk.textes.includes("MES PICKS") && pk.textes.includes("BUTEUR 1+")
      && pk.textes.includes("%") && !/[★☆]/.test(pk.textes),

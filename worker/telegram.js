@@ -906,47 +906,91 @@ function fluxPick(date, jeux) {
   return [L.join("\n")];
 }
 
-/* ---------- 🎰 COMBINÉS : ce qu'on peut parier ENSEMBLE ----------
+/* ---------- 🎰 COMBINÉS : 3 profils, tailles ×2/×3/×5, tirs, MyMatch ----------
    Maths honnêtes : un combiné MULTIPLIE les probabilités (et les gains).
    - entre matchs différents → indépendance réelle, produit exact ;
    - même match (MyMatch) → corrélation, produit minoré de 5 %.
-   Les matchs pièges sont exclus du combiné SÛR. */
+   Les matchs pièges sont exclus des profils. */
+function poissonSup(lam, n) {          // P(X ≥ n), X ~ Poisson(lam)
+  let somme = 0, terme = Math.exp(-lam);
+  for (let i = 0; i < n; i++) { if (i) terme *= lam / i; somme += terme; }
+  return Math.max(0, Math.min(1, 1 - somme));
+}
+function rowsTirs(jeux) {              // tirs cadrés : λ = tirs/match × contexte adverse
+  const sas = [];
+  jeux.forEach((g) => ["away", "home"].forEach((sd) => {
+    const v = ((g.ctx || {})[sd] || {}).oppSa;
+    if (v) sas.push(v);
+  }));
+  const moy = sas.length ? sas.reduce((a, b) => a + b, 0) / sas.length : 30;
+  const rows = [];
+  jeux.forEach((g) => {
+    (g.players || []).forEach((p) => {
+      const sh = (p.perGame || {}).sh;
+      if (!sh || (p.flags || []).includes("absent") || (p.gp || 0) < 5) return;
+      const cote = g.away === p.opp ? "home" : "away";
+      const f = Math.max(0.85, Math.min(1.2, (((g.ctx || {})[cote] || {}).oppSa || moy) / moy));
+      const lam = sh * f;
+      rows.push({ prob: poissonSup(lam, 2), prob3: poissonSup(lam, 3), g,
+        txt: esc(p.name) + " " + eq(p.abbr) + " @ " + eq(p.opp) });
+    });
+  });
+  rows.sort((a, b) => b.prob - a.prob);
+  return rows;
+}
 function fluxCombi(date, jeux) {
   const piege = new Set(jeux.filter((g) => g.piege).map((g) => String(g.id)));
   const pasPiege = (r) => r.g && !piege.has(String(r.g.id));
-  // 1 seul joueur par match (indépendance entre les jambes du combiné)
   const uniq = (rows) => { const vus = new Set(); return rows.filter((r) => {
     const k = String(r.g.id); if (vus.has(k)) return false; vus.add(k); return true; }); };
   const pts = uniq(rowsMarche(jeux, "pointeur").filter(pasPiege));
   const buts = uniq(rowsMarche(jeux, "buteur").filter(pasPiege));
   const p2 = uniq(rowsMarche(jeux, "doublePointeur").filter(pasPiege));
+  const p3 = uniq(rowsMarche(jeux, "triplePointeur").filter(pasPiege));
+  pts.forEach((r) => { r.lb = "1+ pt"; });
+  buts.forEach((r) => { r.lb = "1+ but"; });
+  p2.forEach((r) => { r.lb = "2+ pts"; });
+  p3.forEach((r) => { r.lb = "3+ pts"; });
   const prod = (rows) => rows.reduce((x, r) => x * r.prob, 1);
+  const t = (r) => r.txt.replace(/\s*<i>[\s\S]*<\/i>/, "");
+  const autreMatch = (liste, r) => !liste.some((x) => String(x.g.id) === String(r.g.id));
   const L = ["🎰 <b>COMBINÉS — " + esc(dateFr(date)) + "</b>",
     "<i>Un combiné multiplie les probabilités : gros gain, plus petit %.</i>", SEP];
-  const bloc = (ico, titre, rows, note) => {
+  const profil = (ico, titre, rows, note) => {
     if (rows.length < 2) return;
-    L.push(ico + " <b>" + titre + " — " + pct(prod(rows)) + "</b>" + (note ? " <i>" + note + "</i>" : ""));
-    rows.forEach((r, i) => L.push("  " + (i + 1) + ". " + r.txt.replace(/\s*<i>[\s\S]*<\/i>/, "")
+    const cinq = rows.slice(0, 5);
+    L.push(ico + " <b>" + titre + "</b>" + (note ? " <i>" + note + "</i>" : ""));
+    cinq.forEach((r, i) => L.push(" " + (i + 1) + ". " + t(r) + (r.lb ? " <i>" + r.lb + "</i>" : "")
       + " · <b>" + pct(r.prob) + "</b>" + (r.news ? " 📰" : "")));
-    L.push("");
+    L.push(" → " + [[2, "×2"], [3, "×3"], [5, "×5"]].filter(([n]) => cinq.length >= n)
+      .map(([n, lb]) => lb + " = <b>" + pct(prod(cinq.slice(0, n))) + "</b>").join(" · "), "");
   };
-  bloc("🔒", "COMBINÉ SÛR · 1+ point ×3", pts.slice(0, 3));
-  bloc("⚡", "COMBINÉ BUTS · 1+ but ×3", buts.slice(0, 3));
-  const jack = [...pts.slice(0, 1), ...buts.slice(1, 2), ...p2.slice(0, 1)];
-  if (jack.length === 3 && new Set(jack.map((r) => String(r.g.id))).size === 3)
-    bloc("💎", "COMBINÉ JACKPOT · mixte ×3", jack, "risqué, petit budget");
-  // MyMatch Winamax : 2 joueurs du MÊME match à combiner
+  profil("🔒", "PROFIL SÛR · 1+ point", pts);
+  const eqm = pts.slice(0, 3);
+  buts.forEach((r) => { if (eqm.length < 5 && autreMatch(eqm, r)) eqm.push(r); });
+  profil("⚡", "PROFIL ÉQUILIBRÉ · points + buts", eqm);
+  const jk = [];
+  const prends = (src, max) => { let n = 0; src.forEach((r) => {
+    if (jk.length < 5 && n < max && autreMatch(jk, r)) { jk.push(r); n++; } }); };
+  prends(p2, 3); prends(p3, 1); prends(buts, 2);
+  profil("💎", "PROFIL JACKPOT · 2+/3+ points & buts", jk);
+  const tirs = uniq(rowsTirs(jeux).filter(pasPiege)).slice(0, 3);
+  if (tirs.length) {
+    L.push("🎯 <b>TIRS CADRÉS</b> <i>(ajoutable à tes combinés)</i>");
+    tirs.forEach((r) => L.push(" • " + r.txt + " — 2+ : <b>" + pct(r.prob) + "</b> · 3+ : " + pct(r.prob3)));
+    L.push("");
+  }
   const mm = [];
   jeux.forEach((g) => {
     const pl = (g.players || []).find((p) => p.pointeur && p.pointeur.rank === 1);
-    let bu = (g.players || []).find((p) => p.buteur && p.buteur.rank === 1 && (!pl || p.id !== pl.id));
+    const bu = (g.players || []).find((p) => p.buteur && p.buteur.rank === 1 && (!pl || p.id !== pl.id));
     if (!pl || !bu) return;
-    const disc = pl.abbr === bu.abbr ? 0.95 : 0.97;   // corrélation même match
+    const disc = pl.abbr === bu.abbr ? 0.95 : 0.97;
     mm.push({ g, pl, bu, prob: pl.pointeur.prob * bu.buteur.prob * disc });
   });
   mm.sort((a, b) => b.prob - a.prob);
   if (mm.length) {
-    L.push(SEP, "🏟 <b>MYMATCH — 2 joueurs du même match</b>");
+    L.push("🏟 <b>MYMATCH — 2 joueurs du même match</b>");
     mm.slice(0, 3).forEach((m) => {
       L.push(eq(m.g.away) + " @ " + eq(m.g.home) + " — <b>" + pct(m.prob) + "</b>"
         + (m.g.piege ? " ⚠️ <i>piège</i>" : ""));
@@ -956,10 +1000,10 @@ function fluxCombi(date, jeux) {
   }
   const pj = jeux.filter((g) => g.piege);
   if (pj.length) {
-    L.push("", "⚠️ <b>Écartés du SÛR</b> (pièges) : "
+    L.push("", "⚠️ <b>Écartés des profils</b> (pièges) : "
       + pj.map((g) => esc(g.away) + "@" + esc(g.home)).join(" · "));
   }
-  L.push("", "<i>Vérifie les cotes Winamax : combiné rentable si cote × " + "proba > 1.</i>");
+  L.push("", "<i>Vérifie les cotes Winamax : combiné rentable si cote × proba > 1.</i>");
   return [L.join("\n")];
 }
 
