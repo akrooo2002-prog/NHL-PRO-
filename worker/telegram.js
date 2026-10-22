@@ -116,13 +116,8 @@ const OUTS_CHAMP = { outsider: "outsiders", outsiderButeur: "outsidersButeur",
 // ✅ sûr = tête du marché + indice solide · 🔥 valeur = 3 derniers matchs très au-dessus
 const vTxt = (v) => (v === "VALUE" ? " 🔥" : v === "SUR" ? " ✅" : "");
 
-/* ---- identité visuelle : couleur primaire de chaque organisation ---- */
-const COULEURS = { ANA: "🟧", BOS: "🟨", BUF: "🟦", CAR: "🟥", CBJ: "🟦", CGY: "🟥",
-  CHI: "🟥", COL: "🟪", DAL: "🟩", DET: "🟥", EDM: "🟧", FLA: "🟥", LAK: "⬛",
-  MTL: "🟥", MIN: "🟩", NSH: "🟨", NJD: "🟥", NYI: "🟦", NYR: "🟦", OTT: "🟥",
-  PHI: "🟧", PIT: "⬛", SEA: "🟦", SJS: "🟦", STL: "🟦", TBL: "🟦", TOR: "🟦",
-  UTA: "⬛", VAN: "🟦", VGK: "🟨", WPG: "🟦", WSH: "🟥" };
-const eq = (ab) => (COULEURS[ab] || "⚪") + " " + esc(ab || "?");
+/* ---- équipes : abréviation seule, lisible ---- */
+const eq = (ab) => esc(ab || "?");
 const MOIS_FR = ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août",
   "sept.", "oct.", "nov.", "déc."];
 const JOURS_FR = ["dim.", "lun.", "mar.", "mer.", "jeu.", "ven.", "sam."];
@@ -849,6 +844,7 @@ function blocGlobal(date, jeux, marches) {
     L.push("", SEP, "⚠️ <b>MATCHS PIÈGES</b>");
     pieges.forEach((g) => L.push(" " + eq(g.away) + " @ " + eq(g.home) + " — " + esc(g.piege)));
   }
+  L.push("", "✅ SÛR · 🔥 VALUE · 💎 OUTSIDER");
   return L.join("\n");
 }
 function blocPodium(date, jeux) {
@@ -900,7 +896,7 @@ function fluxPick(date, jeux) {
   if (!n) L.push("Rien d'assez solide ce soir — passe ton tour, c'est aussi un choix.");
   else {
     L.push(SEP);
-    L.push("✅ = 70 %+ · 📰 = actu blessure · ⚠️ = piège, mise réduite");
+    L.push("✅ SÛR · 🔥 VALUE · 💎 OUTSIDER · 📰 blessure · ⚠️ piège");
     L.push("<i>Tout comparer : /classement · tout le détail : /buteur, /pointeur…</i>");
   }
   return [L.join("\n")];
