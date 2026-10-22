@@ -421,7 +421,7 @@ def espn_blesses(payload):
 
 
 def dailyfaceoff_overrides(payload):
-    """Gardiens confirmés → overrides {id_match: {"goalies": {"away"|"home": playerId}}}."""
+    """Gardiens partants (Daily Faceoff) → overrides {id_match: {"goalies": {...}}}."""
     try:
         req = urllib.request.Request(DFO_URL, headers=DFO_UA)
         html = urllib.request.urlopen(req, timeout=25).read().decode("utf-8", "replace")
@@ -465,7 +465,7 @@ def dailyfaceoff_overrides(payload):
         for cote, cle_eq, cle_gk, cle_st in (
                 ("away", "awayTeamName", "awayGoalieName", "awayNewsStrengthName"),
                 ("home", "homeTeamName", "homeGoalieName", "homeNewsStrengthName")):
-            if (r.get(cle_st) or "") != "Confirmed":
+            if not r.get(cle_gk):
                 continue
             ab = nom2abbr.get(_norme(r.get(cle_eq)))
             g = jour.get(ab) if ab else None
@@ -478,7 +478,7 @@ def dailyfaceoff_overrides(payload):
             ent = out.setdefault(str(g["id"]), {"goalies": {}, "absents": []})
             ent["goalies"][cote] = pid
             n_ok += 1
-    msg = f"     Daily Faceoff : {n_ok} gardien(s) confirmé(s) injecté(s)"
+    msg = f"     Daily Faceoff : {n_ok} gardien(s) partant(s) injecté(s)"
     if n_rate:
         msg += f", {n_rate} non retrouvé(s) dans les effectifs"
     print(msg)

@@ -79,6 +79,7 @@ const AIDE =
   "/gardien — gardiens probables + corriger un partant\n" +
   "/bilan — 📊 mes résultats · « bilan hier » · « bilan 2026-10-05 » · « bilan semaine »\n" +
   "/pick — 🎯 MES CHOIX : un nom par marché, direct\n" +
+  "/combi — 🎰 combinés (SÛR · BUTS · JACKPOT) + MyMatch même match\n" +
   "/classement — 📊 % décroissant, marché au choix par boutons\n" +
   "/refresh — 🔄 gardiens revérifiés + analyses réadaptées\n" +
   "/news — 📰 actus NHL en direct (blessures, compos)\n" +
@@ -160,8 +161,8 @@ function kbMenu(etat, d) {
     [btn("🏆 Podium", "P:" + etat), btn("🌟 Top du jour", "O:" + etat)],
     [btn("🥅 Gardiens", "Y:" + etat), btn("📅 " + date.slice(5).replace("-", "/"), "K:" + etat)],
     [btn("📊 Bilan", "B:" + etat), btn("❓ Aide", "A")],
-    [btn("🎯 Mes picks", "X:" + etat), btn("📊 Classement %", "C:" + etat)],
-    [btn("🔄 Refresh", "W:" + etat)],
+    [btn("🎯 Mes picks", "X:" + etat), btn("🎰 Combinés", "V:" + etat)],
+    [btn("📊 Classement %", "C:" + etat), btn("🔄 Refresh", "W:" + etat)],
   ] };
 }
 function kbFiltres(etat) {
@@ -905,6 +906,63 @@ function fluxPick(date, jeux) {
   return [L.join("\n")];
 }
 
+/* ---------- 🎰 COMBINÉS : ce qu'on peut parier ENSEMBLE ----------
+   Maths honnêtes : un combiné MULTIPLIE les probabilités (et les gains).
+   - entre matchs différents → indépendance réelle, produit exact ;
+   - même match (MyMatch) → corrélation, produit minoré de 5 %.
+   Les matchs pièges sont exclus du combiné SÛR. */
+function fluxCombi(date, jeux) {
+  const piege = new Set(jeux.filter((g) => g.piege).map((g) => String(g.id)));
+  const pasPiege = (r) => r.g && !piege.has(String(r.g.id));
+  // 1 seul joueur par match (indépendance entre les jambes du combiné)
+  const uniq = (rows) => { const vus = new Set(); return rows.filter((r) => {
+    const k = String(r.g.id); if (vus.has(k)) return false; vus.add(k); return true; }); };
+  const pts = uniq(rowsMarche(jeux, "pointeur").filter(pasPiege));
+  const buts = uniq(rowsMarche(jeux, "buteur").filter(pasPiege));
+  const p2 = uniq(rowsMarche(jeux, "doublePointeur").filter(pasPiege));
+  const prod = (rows) => rows.reduce((x, r) => x * r.prob, 1);
+  const L = ["🎰 <b>COMBINÉS — " + esc(dateFr(date)) + "</b>",
+    "<i>Un combiné multiplie les probabilités : gros gain, plus petit %.</i>", SEP];
+  const bloc = (ico, titre, rows, note) => {
+    if (rows.length < 2) return;
+    L.push(ico + " <b>" + titre + " — " + pct(prod(rows)) + "</b>" + (note ? " <i>" + note + "</i>" : ""));
+    rows.forEach((r, i) => L.push("  " + (i + 1) + ". " + r.txt.replace(/\s*<i>[\s\S]*<\/i>/, "")
+      + " · <b>" + pct(r.prob) + "</b>" + (r.news ? " 📰" : "")));
+    L.push("");
+  };
+  bloc("🔒", "COMBINÉ SÛR · 1+ point ×3", pts.slice(0, 3));
+  bloc("⚡", "COMBINÉ BUTS · 1+ but ×3", buts.slice(0, 3));
+  const jack = [...pts.slice(0, 1), ...buts.slice(1, 2), ...p2.slice(0, 1)];
+  if (jack.length === 3 && new Set(jack.map((r) => String(r.g.id))).size === 3)
+    bloc("💎", "COMBINÉ JACKPOT · mixte ×3", jack, "risqué, petit budget");
+  // MyMatch Winamax : 2 joueurs du MÊME match à combiner
+  const mm = [];
+  jeux.forEach((g) => {
+    const pl = (g.players || []).find((p) => p.pointeur && p.pointeur.rank === 1);
+    let bu = (g.players || []).find((p) => p.buteur && p.buteur.rank === 1 && (!pl || p.id !== pl.id));
+    if (!pl || !bu) return;
+    const disc = pl.abbr === bu.abbr ? 0.95 : 0.97;   // corrélation même match
+    mm.push({ g, pl, bu, prob: pl.pointeur.prob * bu.buteur.prob * disc });
+  });
+  mm.sort((a, b) => b.prob - a.prob);
+  if (mm.length) {
+    L.push(SEP, "🏟 <b>MYMATCH — 2 joueurs du même match</b>");
+    mm.slice(0, 3).forEach((m) => {
+      L.push(eq(m.g.away) + " @ " + eq(m.g.home) + " — <b>" + pct(m.prob) + "</b>"
+        + (m.g.piege ? " ⚠️ <i>piège</i>" : ""));
+      L.push("  " + esc(m.pl.name) + " " + eq(m.pl.abbr) + " 1+ point (" + pct(m.pl.pointeur.prob) + ")"
+        + " + " + esc(m.bu.name) + " " + eq(m.bu.abbr) + " 1+ but (" + pct(m.bu.buteur.prob) + ")");
+    });
+  }
+  const pj = jeux.filter((g) => g.piege);
+  if (pj.length) {
+    L.push("", "⚠️ <b>Écartés du SÛR</b> (pièges) : "
+      + pj.map((g) => esc(g.away) + "@" + esc(g.home)).join(" · "));
+  }
+  L.push("", "<i>Vérifie les cotes Winamax : combiné rentable si cote × " + "proba > 1.</i>");
+  return [L.join("\n")];
+}
+
 /* ---------- 🔄 refresh : gardiens revérifiés MAINTENANT, analyses réadaptées ---------- */
 async function fluxRefresh(d) {
   const date = jourDefaut(d);
@@ -924,7 +982,7 @@ async function fluxRefresh(d) {
       : "aucun gardien confirmé pour l'instant — les probables restent en place"),
     "🧮 Analyses " + (nAd ? "réadaptées sur " + nAd + " match" + (nAd > 1 ? "s" : "")
       : "à jour") + " avec ces gardiens.",
-    "", "<i>Le bot revérifie aussi tout seul toutes les 20 min dès que tu lui parles.</i>"].join("\n");
+    "", "<i>Le bot revérifie aussi tout seul toutes les 20 min dès que tu lui parles.</i>"];
 }
 
 /* ---------- réponse complète ---------- */
@@ -939,6 +997,10 @@ async function traite(text) {
     return fluxNews();
   const tx = String(text || "").trim();
   if (/^\/?(refresh|maj|rafrai?chi?r?|rafraîchir?)$/i.test(tx)) return await fluxRefresh(d);
+  if (/^\/?(combi|combis|combiné|combine|combinaison|jackpot|mymatch)$/i.test(tx)) {
+    const dateC = jourDefaut(d);
+    return fluxCombi(dateC, await jourAdapte(dateC, d));
+  }
   if (/^\/?(pick|picks|monpick|mespicks?|choix)$/i.test(tx)) {
     const dateP = jourDefaut(d);
     return fluxPick(dateP, await jourAdapte(dateP, d));
@@ -1070,6 +1132,10 @@ async function traiteCallback(data, d) {
   }
   if (cmd === "P") return { envoie: [blocPodium(date, await jourAdapte(date, d))], clavier: kbMenu(etat, d) };
   if (cmd === "K") return { edit: { texte: "📅 <b>Choisis un jour</b> :", clavier: kbJours(etat, d) } };
+  if (cmd === "V") {
+    const jeux = await jourAdapte(date, d);
+    return { envoie: fluxCombi(date, jeux), clavier: kbMenu(etat, d) };
+  }
   if (cmd === "X") {
     const jeux = await jourAdapte(date, d);
     return { envoie: fluxPick(date, jeux), clavier: kbMenu(etat, d) };

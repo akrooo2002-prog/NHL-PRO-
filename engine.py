@@ -14,6 +14,7 @@ Logique (dans l'ordre) :
 Usage:  python3 engine.py
 """
 import json
+import unicodedata
 import time
 import math
 import os
@@ -118,6 +119,11 @@ def poisson_geq(lam, k):
 # Marchés « seuils » : 2+ buts / 3+ buts / 2+ points / 3+ points dans le match.
 # Barème d'étoiles propre : ces événements sont rares, le barème général des
 # marchés simples donnerait ★ à tout le monde.
+
+def cle_nom(n):
+    """Clé de tri des noms identique côté client : sans accents, minuscules."""
+    return unicodedata.normalize("NFD", str(n)).encode("ascii", "ignore").decode().lower()
+
 SEUILS_MK = {"doubleButeur": (2, "g"), "tripleButeur": (3, "g"),
              "doublePointeur": (2, "pts"), "triplePointeur": (3, "pts")}
 BAREMES = {"doubleButeur": [(8, 5), (5, 4), (2.5, 3), (1, 2), (0, 1)],
@@ -362,8 +368,10 @@ def run(raw):
                     "lastGame": rec[0].get("date"), "lastSv": rec[0].get("savePctg"),
                     "estimated": True}
         best = None
+        ros_ids = {gg["id"] for gg in
+                   (raw.get("rosters", {}).get(abbr, {}) or {}).get("goalies", [])}
         for gg in raw["goalies"].get(ref, []):
-            if abbr in str(gg.get("teamAbbrevs", "")):
+            if gg.get("playerId") in ros_ids or abbr in str(gg.get("teamAbbrevs", "")):
                 if best is None or gg.get("gamesPlayed", 0) > best.get("gamesPlayed", 0):
                     best = gg
         if best:
@@ -484,7 +492,7 @@ def run(raw):
             # 2e temps : le rang suit la confiance affichée, puis le score AFFICHÉ (arrondi),
             # puis le nom — exactement le même départage que le recalcul côté client.
             ranked = sorted((p for p in players if p[mk]["score"] > 0),
-                            key=lambda p: (-p[mk]["confidence"], -p[mk]["score"], p["name"]))
+                            key=lambda p: (-p[mk]["confidence"], -p[mk]["score"], cle_nom(p["name"])))
             for i, p in enumerate(ranked):
                 p[mk]["rank"] = i + 1
             for p in players:
@@ -500,7 +508,7 @@ def run(raw):
                     p[mk]["confidence"] = js_round(
                         confidence(p[mk]["prob"], p["gp"], p["flags"], preseason), 1)
             ranked = sorted((p for p in players if p[mk]["score"] > 0),
-                            key=lambda p: (-p[mk]["score"], p["name"]))
+                            key=lambda p: (-p[mk]["score"], cle_nom(p["name"])))
             for i, p in enumerate(ranked):
                 p[mk]["rank"] = i + 1
             for p in players:

@@ -231,6 +231,13 @@ let WORKER;
     ok(!q2p.textes.includes("OUTSIDER 2+ POINTS"), "outsider 2+ points : aucun ce jour → pas de bloc");
   }
 
+  const rf = await dire("refresh");
+  ok(rf.morceaux >= 1 && rf.textes.includes("ACTUALISÉ") && !rf.textes.includes("Erreur"),
+    "/refresh : réponse propre (bug forEach corrigé)");
+  const cb = await dire("combi");
+  ok(cb.morceaux === 1 && cb.textes.includes("COMBINÉS") && cb.textes.includes("COMBINÉ SÛR")
+     && cb.textes.includes("MYMATCH") && !/[★☆]/.test(cb.textes),
+    "/combi : combinés + MyMatch en 1 message");
   const pk = await dire("pick");
   ok(pk.morceaux === 1 && pk.textes.includes("MES PICKS") && pk.textes.includes("BUTEUR 1+")
      && pk.textes.includes("%") && !/[★☆]/.test(pk.textes),

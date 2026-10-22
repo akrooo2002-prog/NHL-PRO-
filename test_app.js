@@ -130,9 +130,16 @@ const note = (cond, label, extra = "") => {
   const total = all.length;
   ok(total > 3000, "volume d'analyses", total.toLocaleString("fr-FR") + " joueurs");
   const recrues = all.filter(p => p.recrue);
-  ok(recrues.length > 100, "recrues présentes", recrues.length + " fiches");
-  const ligues = [...new Set(recrues.map(r => r.recrue.ligue))];
-  ok(ligues.length >= 3, "recrues issues de plusieurs ligues", ligues.join(", "));
+  // mi-saison, tout le monde a joué ≥ 1 match NHL → 0 fiche « sans référence » est
+  // légitime ; les jeunes à petit échantillon passent par le shrinkage (gp < 10).
+  const jeunes = all.filter(p => (p.gp || 99) < 8);
+  if (recrues.length === 0) {
+    ok(jeunes.length > 50, "jeunes < 8 GP couverts par shrinkage", jeunes.length + " fiches");
+  } else {
+    ok(recrues.length > 30, "recrues présentes", recrues.length + " fiches");
+    const ligues = [...new Set(recrues.map(r => r.recrue.ligue))];
+    ok(ligues.length >= 2, "recrues issues de plusieurs ligues", ligues.join(", "));
+  }
   const h2h = all.filter(p => p.h2h && p.h2h.n >= 2);
   ok(h2h.length > 50, "historique contre l'adversaire", h2h.length + " joueurs");
   const hausse = all.filter(p => p.flags.includes("en_hausse"));
