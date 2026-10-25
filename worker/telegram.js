@@ -77,7 +77,7 @@ const AIDE =
   "/top — 🌟 le meilleur du jour, filtre par filtre\n" +
   "/demain — analyse de demain\n" +
   "/gardien — gardiens probables + corriger un partant\n" +
-  "/bilan — 📊 mes résultats · « bilan hier » · « bilan 2026-10-05 » · « bilan semaine »\n" +
+  "/bilan — 📊 bilan de la veille : mes bets ✅🔥 par confiance et probabilité, fun séparé, navigation jour par jour ◀ ▶\n" +
   "/pick — 🎯 MES CHOIX : un nom par marché, direct\n" +
   "/combi — 🎰 combinés (SÛR · BUTS · JACKPOT) + MyMatch même match\n" +
   "/classement — 📊 % décroissant, marché au choix par boutons\n" +
@@ -1192,6 +1192,11 @@ async function traiteCallback(data, d) {
   if (cmd === "W") {
     return { envoie: await fluxRefresh(d), clavier: kbMenu(etat, d) };
   }
+  if (cmd === "H") {
+    const arg = String(etat || "");
+    if (arg === "sem") return { envoie: await bilanSemaine(), clavier: kbMenu("".padStart(0), d) };
+    return { envoie: await bilanJour(arg), clavier: kbBilan(arg) };
+  }
   if (cmd === "D") return { edit: { texte: accueilTexte(d, etat), clavier: kbMenu(etat, d) } };
   return {};
 }
@@ -1308,12 +1313,13 @@ async function enregistrePronos(date, d) {
       { expirationTtl: TTL_AN }).catch(() => {});
 }
 
+const stJoueur = (stats, x) => stats[x.id] || stats[na(x.name || "")] || { g: 0, a: 0, p: 0 };
 function hitPick(p, stats) {
   if (p.members && p.members.length) {
-    const buts = p.members.reduce((som, m) => som + ((stats[m.id] || {}).g || 0), 0);
+    const buts = p.members.reduce((som, m) => som + (stJoueur(stats, m).g || 0), 0);
     return (p.mk === "duo" || p.mk === "trio") ? buts >= 1 : buts >= 2;
   }
-  const st = stats[p.id] || { g: 0, a: 0, p: 0 };
+  const st = stJoueur(stats, p);
   switch (p.mk) {
     case "buteur": case "outsiderButeur": return st.g >= 1;
     case "passeur": return st.a >= 1;
@@ -1326,6 +1332,51 @@ function hitPick(p, stats) {
   }
 }
 
+/* Repli ESPN : l'API NHL (api-web) tombe parfois des jours entiers. ESPN ne
+   connaît pas les playerId NHL → on appareille par nom normalisé. */
+function statsDepuisESPN(js) {
+  const stats = {};
+  ((((js || {}).boxscore || {}).players) || []).forEach((t) =>
+    (t.statistics || []).forEach((grp) => {
+      const ks = grp.keys || [];
+      const ig = ks.indexOf("goals"), ia = ks.indexOf("assists");
+      if (ig < 0 || ia < 0) return;
+      (grp.athletes || []).forEach((a) => {
+        const g = parseInt((a.stats || [])[ig], 10) || 0;
+        const as = parseInt((a.stats || [])[ia], 10) || 0;
+        const ath = a.athlete || {};
+        [ath.displayName, ath.shortName].forEach((nm) => {
+          if (nm) stats[na(nm)] = { g, a: as, p: g + as };
+        });
+      });
+    }));
+  return stats;
+}
+async function boxESPN(date, abbrs) {
+  const dem = new Date(new Date(date + "T12:00:00Z").getTime() + 86400000).toISOString().slice(0, 10);
+  for (const d of [date, dem]) {                        // soirée US = date ET (+1 possible)
+    try {
+      const r = await fetch("https://site.api.espn.com/apis/site/v2/sports/hockey/nhl/scoreboard?dates="
+        + d.replace(/-/g, ""), { headers: { "User-Agent": "Mozilla/5.0" } });
+      if (!r.ok) continue;
+      const j = await r.json();
+      const ev = (j.events || []).find((e) => {
+        const c = (e.competitions || [])[0] || {};
+        if (!(((c.status || {}).type || {}).completed)) return false;
+        const eqs = (c.competitors || []).map((x) => ((x.team || {}).abbreviation) || "");
+        return abbrs.some((a) => eqs.includes(a));
+      });
+      if (!ev) continue;
+      const rs = await fetch("https://site.api.espn.com/apis/site/v2/sports/hockey/nhl/summary?event=" + ev.id,
+        { headers: { "User-Agent": "Mozilla/5.0" } });
+      if (!rs.ok) continue;
+      const stats = statsDepuisESPN(await rs.json());
+      if (Object.keys(stats).length) return stats;
+    } catch (e) { /* on tente la date suivante */ }
+  }
+  return null;
+}
+
 async function verifieJour(date) {
   const snap = await ENV.GARDIENS.get("prono:" + date, "json").catch(() => null);
   if (!snap || !snap.picks || !snap.picks.length) return 0;
@@ -1333,20 +1384,28 @@ async function verifieJour(date) {
   const gids = [...new Set(snap.picks.map((p) => String(p.gid)))];
   const stats = {};
   for (const gid of gids) {
-    let b;
+    let ok = false;
     try {
       const r = await fetch(NHL_API + "/gamecenter/" + gid + "/boxscore",
         { headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36" } });
-      if (!r.ok) return 0;
-      b = await r.json();
-    } catch (e) { return 0; }
-    if (!b || b.gameState !== "OFF") return 0;          // pas fini → on retentera plus tard
-    const pt = b.playerByGameStats || {};
-    ["awayTeam", "homeTeam"].forEach((cote) => ["forwards", "defense"].forEach((ligne) => {
-      (((pt[cote] || {})[ligne]) || []).forEach((j) => {
-        stats[j.playerId] = { g: j.goals || 0, a: j.assists || 0, p: j.points || 0 };
-      });
-    }));
+      if (r.ok) {
+        const b = await r.json();
+        if (!b || b.gameState !== "OFF") return 0;      // pas fini → on retentera plus tard
+        const pt = b.playerByGameStats || {};
+        ["awayTeam", "homeTeam"].forEach((cote) => ["forwards", "defense"].forEach((ligne) => {
+          (((pt[cote] || {})[ligne]) || []).forEach((j) => {
+            stats[j.playerId] = { g: j.goals || 0, a: j.assists || 0, p: j.points || 0 };
+          });
+        }));
+        ok = true;
+      }
+    } catch (e) { /* API NHL hors service → repli ESPN */ }
+    if (!ok) {
+      const abbrs = [...new Set(snap.picks.filter((x) => String(x.gid) === gid).map((x) => x.ab))];
+      const es = await boxESPN(date, abbrs);
+      if (!es) return 0;                                // ni NHL ni ESPN → plus tard
+      Object.assign(stats, es);
+    }
   }
   const picks = snap.picks.map((p) => Object.assign({}, p, { hit: hitPick(p, stats) }));
   const res = { ts: Date.now(), date, n: picks.length,
@@ -1398,70 +1457,99 @@ function ligneBilan(lab, o) {
   if (o.n >= 15 && Math.abs(r - a) >= 10) flag = r < a ? " ⚠️ surévalué" : " 💎 sous-évalué";
   return lab + " : " + r + " % (annonce " + a + ") — " + o.n + " picks" + flag;
 }
+/* Marchés « fun » : très rares, jamais comptés dans le bilan principal. */
+const FUN_MK = new Set(["tripleButeur", "outsiderTripleButeur", "outsiderTriplePointeur"]);
+const decJour = (date, x) => new Date(new Date(date + "T12:00:00Z").getTime()
+  + x * 86400000).toISOString().slice(0, 10);
+function kbBilan(date) {
+  return { inline_keyboard: [[
+    btn("◀ " + dateFr(decJour(date, -1)), "H:" + decJour(date, -1)),
+    btn("📅 7 jours", "H:sem"),
+    btn(dateFr(decJour(date, 1)) + " ▶", "H:" + decJour(date, 1))]] };
+}
+const nHits = (rows) => rows.filter((x) => x.hit).length;
+function ligneTaux(lab, rows) {
+  if (!rows.length) return null;
+  return lab + " — " + nHits(rows) + "/" + rows.length + " · "
+    + Math.round(100 * nHits(rows) / rows.length) + " %";
+}
 async function bilanJour(date) {
   const res = await ENV.GARDIENS.get("result:" + date, "json").catch(() => null);
   if (!res) {
     const snap = await ENV.GARDIENS.get("prono:" + date, "json").catch(() => null);
     if (snap && snap.picks)
-      return ["📊 <b>" + esc(date) + "</b> : " + snap.picks.length
-        + " pronos enregistrées — matchs pas finis ou pas encore vérifiés.\nRenvoie « bilan "
-        + esc(date) + " » plus tard."];
-    return ["📊 Rien pour le " + esc(date)
-      + " : je n'ai pas de pronos enregistrées ce jour-là."];
+      return ["📊 <b>" + esc(dateFr(date)) + "</b> : " + snap.picks.length
+        + " pronos enregistrées — matchs pas finis ou pas encore vérifiés.\nJe revérifie tout seul toutes les 30 min."];
+    return ["📊 Rien pour le " + esc(dateFr(date))
+      + " : pas de pronos enregistrées ce jour-là.\nNavigue avec les boutons ◀ ▶."];
   }
-  const L = ["📊 <b>BILAN " + esc(date) + "</b> — " + res.h + "/" + res.n
-    + " (" + Math.round(100 * res.h / res.n) + " %)"];
-  res.picks.forEach((p) => {
-    L.push((p.hit ? "✅ " : "❌ ") + esc(p.name) + " — " + esc(MK_BILAN[p.mk] || p.mk)
-      + " · " + pct(p.prob) + (p.val === "SUR" ? " ✅" : p.val === "VALUE" ? " 🔥" : ""));
-  });
+  const picks = res.picks || [];
+  const fun = picks.filter((x) => FUN_MK.has(x.mk));
+  const bets = picks.filter((x) => !FUN_MK.has(x.mk) && (x.val === "SUR" || x.val === "VALUE"));
+  const autres = picks.filter((x) => !FUN_MK.has(x.mk) && x.val !== "SUR" && x.val !== "VALUE");
+  const L = ["📊 <b>BILAN — " + esc(dateFr(date)) + "</b>", SEP];
+  if (bets.length) {
+    L.push("💰 <b>MES BETS (✅🔥)</b> — " + nHits(bets) + "/" + bets.length + " · "
+      + Math.round(100 * nHits(bets) / bets.length) + " %");
+    [ligneTaux("  ✅ SÛR", bets.filter((x) => x.val === "SUR")),
+     ligneTaux("  🔥 VALUE", bets.filter((x) => x.val === "VALUE"))].forEach((x) => x && L.push(x));
+    L.push("", "🎯 <b>PAR PROBABILITÉ</b>");
+    [[0.7, 1.01, "  ≥ 70 %"], [0.5, 0.7, "  50–69 %"], [0.3, 0.5, "  30–49 %"], [0, 0.3, "  < 30 %"]]
+      .forEach(([lo, hi, lab]) => {
+        const x = ligneTaux(lab, bets.filter((q) => q.prob >= lo && q.prob < hi));
+        if (x) L.push(x);
+      });
+    L.push("", "📈 <b>PAR MARCHÉ</b>");
+    const par = {};
+    bets.forEach((x) => { (par[x.mk] = par[x.mk] || []).push(x); });
+    L.push("  " + Object.keys(par)
+      .map((mk) => (MK_BILAN[mk] || mk) + " " + nHits(par[mk]) + "/" + par[mk].length).join(" · "));
+    L.push("", SEP, "<b>DÉTAIL — MES BETS</b>");
+    bets.forEach((x) => L.push(" " + (x.hit ? "✅" : "❌") + " " + esc(x.name) + " — "
+      + esc(MK_BILAN[x.mk] || x.mk) + " · " + pct(x.prob) + (x.val === "SUR" ? " ✅" : " 🔥")));
+  } else {
+    L.push("💰 <b>MES BETS (✅🔥)</b> — aucun pick sûr/value ce jour-là.");
+  }
+  if (fun.length) {
+    L.push("", "🎪 <b>FUN</b> <i>(hors bilan)</i> — " + nHits(fun) + "/" + fun.length);
+    fun.forEach((x) => L.push(" " + (x.hit ? "✅" : "❌") + " " + esc(x.name) + " — "
+      + esc(MK_BILAN[x.mk] || x.mk) + " · " + pct(x.prob)));
+  }
+  if (autres.length)
+    L.push("", "📦 <b>TESTÉS</b> — " + nHits(autres) + "/" + autres.length
+      + " picks d'exploration (calibrage du modèle, pas des conseils de mise).");
   return [L.join("\n")];
 }
 async function bilanSemaine() {
   const lignes = [];
-  let n = 0, h = 0;
-  const auj = new Date();
-  for (let i = 0; i < 7; i++) {
-    const dt = new Date(auj.getTime() - i * 86400000).toISOString().slice(0, 10);
+  let n = 0, hh = 0, bn = 0, bh = 0;
+  for (let i = 1; i <= 7; i++) {
+    const dt = decJour(aujourdhui(), -i);
     const res = await ENV.GARDIENS.get("result:" + dt, "json").catch(() => null);
     if (!res) continue;
-    n += res.n; h += res.h;
-    lignes.push("• " + dt.slice(5).replace("-", "/") + " : " + res.h + "/" + res.n
-      + " (" + Math.round(100 * res.h / res.n) + " %)");
+    const bets = (res.picks || []).filter((x) => !FUN_MK.has(x.mk)
+      && (x.val === "SUR" || x.val === "VALUE"));
+    n += res.n; hh += res.h; bn += bets.length; bh += nHits(bets);
+    lignes.push("• " + dateFr(dt) + " — 💰 " + (bets.length
+      ? nHits(bets) + "/" + bets.length : "—") + " · tout " + res.h + "/" + res.n);
   }
   if (!n) return ["📊 <b>7 derniers jours</b> : rien de vérifié pour l'instant."];
-  return [["📊 <b>7 DERNIERS JOURS</b> — " + h + "/" + n
-    + " (" + Math.round(100 * h / n) + " %)", ...lignes].join("\n")];
+  return [["📊 <b>7 DERNIERS JOURS</b>", SEP,
+    "💰 <b>MES BETS</b> — " + bh + "/" + bn + (bn ? " · " + Math.round(100 * bh / bn) + " %" : ""),
+    "📦 Tout — " + hh + "/" + n, SEP, ...lignes].join("\n")];
 }
 async function fluxBilan(d, opt) {
   try { await majBilan(d, true); } catch (e) { /* tant pis */ }
   const arg = na(String(opt || "")).trim();
+  const nav = async (dateC) => { const r = await bilanJour(dateC); CLAVIER_REP = kbBilan(dateC); return r; };
   if (arg) {
     const iso = String(opt).match(/(\d{4})-(\d{2})-(\d{2})/);
-    if (iso) return bilanJour(iso[0]);
-    if (/^(hier|veille|yesterday)$/.test(arg))
-      return bilanJour(new Date(new Date(jourDefaut(d) + "T12:00:00Z").getTime() - 86400000)
-        .toISOString().slice(0, 10));
+    if (iso) return nav(iso[0]);
+    if (/^(hier|veille|yesterday)$/.test(arg)) return nav(decJour(jourDefaut(d), -1));
     if (/^(semaine|7 jours|7jours|week)$/.test(arg)) return bilanSemaine();
     return ["Écris « bilan hier », « bilan semaine » ou « bilan 2026-10-05 »."];
   }
-  const agg = await ENV.GARDIENS.get("bilan:agg", "json").catch(() => null);
-  if (!agg || !agg.n)
-    return ["📊 <b>BILAN</b>\nRien de vérifié pour l'instant : j'enregistre les pronos chaque jour et je compare aux résultats après les matchs. Repasse après les premiers matchs !"];
-  const r = Math.round(100 * agg.h / agg.n), a = Math.round(100 * agg.sp / agg.n);
-  const verdict = Math.abs(r - a) < 5 ? "→ ✅ bien calibré" : (r < a ? "→ ⚠️ trop confiant" : "→ 💎 trop prudent");
-  const L = ["📊 <b>BILAN DU BOT</b> — " + agg.n + " pronos vérifiées",
-    "🎯 Réussite : <b>" + r + " %</b> (" + agg.h + "/" + agg.n + ") · probabilité annoncée : " + a + " % " + verdict];
-  const bloc = (titre, lignes) => { if (lignes.length) { L.push("", "<b>" + titre + "</b>"); L.push(...lignes.map((x) => "• " + x)); } };
-  bloc("Par marché", Object.keys(agg.mk).sort((x, y) => agg.mk[y].n - agg.mk[x].n)
-    .map((k) => ligneBilan(MK_BILAN[k] || k, agg.mk[k])).filter(Boolean));
-  bloc("Par étiquette", [["SUR", "✅ SÛR"], ["PROBABLE", "PROBABLE"], ["VALUE", "🔥 VALEUR"]]
-    .map(([v, lab]) => ligneBilan(lab, agg.val[v])).filter(Boolean));
-  bloc("Par palier", Object.keys(agg.pal).filter((k) => +k > 0).sort((x, y) => y - x)
-    .map((k) => ligneBilan(etoilesDe(+k), agg.pal[k])).filter(Boolean));
-  L.push("", "⚠️ = le bot annonce trop haut · 💎 = le bot sous-estime (bon filon)");
-  L.push("Jour par jour : « bilan hier », « bilan 2026-10-05 », « bilan semaine ».");
-  return [L.join("\n")];
+  return nav(decJour(aujourdhui(), -1));   // la veille par défaut, navigation ◀ ▶
 }
 
 // ---- 📰 actus NHL en direct (ESPN, sans clé) — cache KV 15 min ----
@@ -1573,6 +1661,7 @@ export default {
   // gardiens arrivaient donc en retard sur le site.
   async scheduled(event, env) {
     ENV = env || {};
+    try { await majBilan(null, true); } catch (e) { /* tant pis */ }
     if (!ENV.GITHUB_PAT) return;
     try {
       await fetch("https://api.github.com/repos/akrooo2002-prog/NHL-PRO-/actions/workflows/refresh.yml/dispatches", {

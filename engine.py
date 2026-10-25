@@ -204,6 +204,60 @@ def calib(mk):
     return facteurs_calibrage().get(mk, 1.0)
 
 
+# ---- récalibrage de fiabilité (Platt) : le % AFFICHÉ = le % RÉEL ----
+# Le facteur linéaire ci-dessus corrige le niveau moyen d'un marché, pas sa
+# COURBE : sur 1012 picks vérifiés, un « 80 % » n'était réalisé que 64 % du
+# temps, un « 95 % » que 86 %. On ajuste donc a et b tels que
+#   P(réussi | logit(p)) = sigmoid(a·logit(p) + b)
+# par descente de gradient sur nos propres résultats. a < 1 = le modèle est
+# trop sûr de lui ; la correction ramène chaque palier vers son taux réel,
+# et les probabilités faibles bougent à peine.
+_PLATT = None
+
+
+def platt_params():
+    global _PLATT
+    if _PLATT is None:
+        a, b, n = 1.0, 0.0, 0
+        try:
+            with open(CALIB_FILE, encoding="utf-8") as fh:
+                rows = [(math.log(max(1e-4, min(1 - 1e-4, float(v["prob"])))
+                                  / (1 - max(1e-4, min(1 - 1e-4, float(v["prob"]))))),
+                         1.0 if v["hit"] else 0.0)
+                        for v in json.load(fh)
+                        if v.get("prob") and v.get("hit") is not None]
+        except Exception:
+            rows = []
+        n = len(rows)
+        if n >= 60:
+            lr = 0.05
+            for _ in range(4000):
+                ga = gb = 0.0
+                for x, y in rows:
+                    z = max(-30.0, min(30.0, a * x + b))
+                    d = 1.0 / (1.0 + math.exp(-z)) - y
+                    ga += d * x
+                    gb += d
+                a -= lr * ga / n
+                b -= lr * gb / n
+            a = max(0.4, min(1.6, a))
+            b = max(-2.0, min(2.0, b))
+        else:
+            a, b = 1.0, 0.0
+        _PLATT = (a, b, n)
+    return _PLATT
+
+
+def recal(p):
+    """Probabilité corrigée = probabilité réellement observée à ce niveau."""
+    a, b, n = platt_params()
+    if n < 60:
+        return p
+    q = max(1e-4, min(1 - 1e-4, float(p)))
+    z = max(-30.0, min(30.0, a * math.log(q / (1 - q)) + b))
+    return max(0.0, min(0.995, 1.0 / (1.0 + math.exp(-z))))
+
+
 def seuils_markets(rec, lam_g, lam_p, log, cap=None):
     """Ajoute les 4 marchés à seuils au dossier joueur (mêmes λ que les
     marchés simples : cohérence garantie entre « 1+ but » et « 2+ buts »)."""
@@ -212,7 +266,8 @@ def seuils_markets(rec, lam_g, lam_p, log, cap=None):
         # la queue de Poisson surestime les événements rares (les buts d'une
         # équipe se concentrent sur les mêmes matchs) : mélange 50/50 avec le
         # taux réel NHL, puis facteur empirique du marché.
-        prob = round((0.5 * poisson_geq(lam, k) + 0.5 * BASE_SEUIL[mk]) * calib(mk), 4)
+        prob = round(recal((0.5 * poisson_geq(lam, k) + 0.5 * BASE_SEUIL[mk])
+                           * calib(mk)), 4)
         score = js_round(100 * prob, 1)
         pal_rel = palier_bareme_rel(score, mk)   # classement interne du marché
         pal = min(pal_rel, palier_abs(score))    # étoiles = probabilité réelle
@@ -628,8 +683,8 @@ def run(raw):
                 # λ minoré + décote queue : les soirées sans but existent.
                 lam = sum(p["buteur"]["lam"] or 0.0 for p in sel) * 0.85
                 prob = poisson_geq(lam, k) * 0.75
-            prob = round(prob * calib({"doubleChance": "duo",
-                                       "tripleChance": "trio"}.get(mk_key, mk_key)), 4)
+            prob = round(recal(prob * calib({"doubleChance": "duo",
+                                             "tripleChance": "trio"}.get(mk_key, mk_key))), 4)
             pc100 = prob * 100.0
             pal = palier_bareme(pc100, mk_key)
             conf = js_round(0.6 * sum(p["buteur"]["confidence"] or 0 for p in sel) / n
@@ -698,6 +753,8 @@ def run(raw):
         "teams": tindex, "goalies": goalies, "goalieList": goalie_list,
         "games": games_out, "paliers": PALIERS, "baremes": BAREMES,
         "palAbs": PAL_ABS, "calib": facteurs_calibrage(),
+        "platt": {"a": round(platt_params()[0], 4), "b": round(platt_params()[1], 4),
+                  "n": platt_params()[2]},
     }
     return out
 
@@ -833,7 +890,7 @@ def rookie_record(p, ctx, land, bio, lg_sh_pct, preseason):
     }
     for kind in ("buteur", "passeur", "pointeur"):  # marchés de la recrue
         lam = rec["lambda"][{"buteur": "g", "passeur": "a", "pointeur": "pts"}[kind]]
-        prob = round((1 - math.exp(-lam)) * calib(kind), 4)
+        prob = round(recal((1 - math.exp(-lam)) * calib(kind)), 4)
         rec[kind] = {"score": js_round(100 * prob, 1), "prob": prob,
                      "lam": round(lam, 3), "confidence": conf,
                      "palier": palier(conf), "etoiles": etoiles(palier(conf)),
@@ -1017,9 +1074,9 @@ def player_record(p, ctx, sk_by_season, log, active, ref, career, lg_sh_pct,
     lam_a_nog = (lam_a - 2 * 0.30 * lam_g) / ctx["goalieF"] + 2 * 0.30 * lam_g \
         if ctx["goalieF"] else lam_a
 
-    prob_g = (1 - math.exp(-lam_g)) * calib("buteur")
-    prob_a = (1 - math.exp(-lam_a)) * calib("passeur")
-    prob_p = (1 - math.exp(-lam_p)) * calib("pointeur")
+    prob_g = recal((1 - math.exp(-lam_g)) * calib("buteur"))
+    prob_a = recal((1 - math.exp(-lam_a)) * calib("passeur"))
+    prob_p = recal((1 - math.exp(-lam_p)) * calib("pointeur"))
 
     msG, nxtG, gapG = msG0, nxtG0, gapG0
     msA, nxtA, gapA = msA0, nxtA0, gapA0

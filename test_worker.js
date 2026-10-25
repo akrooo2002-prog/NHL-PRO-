@@ -351,12 +351,10 @@ let WORKER;
   ok(snap && snap.picks.length >= jeuxDefaut.length * 7,
     "bilan : pronos enregistrées (" + (snap ? snap.picks.length : 0) + " picks — 7 marchés + outsiders + combos)");
   const res = JSON.parse(kvStore.get("result:" + defaut).value);
-  ok(res && res.n === snap.picks.length && res.h === res.n
-    && bb1.morceaux === 1 && bb1.textes.includes("100 %")
-    && bb1.textes.includes("Par marché") && bb1.textes.includes("Buteur 1+"),
-    "bilan : vérifié sur les résultats réels (100 %) — 1 seul message Telegram non vide");
-  ok(bb1.textes.includes("trop prudent") || bb1.textes.includes("sous-évalué"),
-    "bilan : verdict de calibration (annoncé vs réalisé)");
+  ok(res && res.n === snap.picks.length && res.h === res.n && bb1.morceaux === 1
+    && bb1.textes.includes("<b>BILAN — "),
+    "bilan par défaut = la veille, en 1 message — jour par défaut vérifié "
+    + (res ? res.h + "/" + res.n : "?"));
   // « hier » du worker = jour par défaut moins 1 jour calendrier
   const hier = new Date(new Date(defaut + "T12:00:00Z").getTime() - 86400000).toISOString().slice(0, 10);
   kvStore.set("prono:" + hier, { value: JSON.stringify({ ts: Date.now(), date: hier,
@@ -366,10 +364,38 @@ let WORKER;
   await dire("bilan");
   ok(!kvStore.get("result:" + hier), "bilan : match pas fini → pas encore vérifié (réessaiera)");
   const bj = await dire("bilan " + defaut);
-  const snap0 = snap.picks.filter((x) => x.mk === "buteur")[0];
-  ok(bj.textes.includes("BILAN " + defaut) && bj.textes.includes("100 %")
-    && bj.textes.includes("✅ " + snap0.name),
-    "bilan par date : détail pick par pick (" + snap0.name + " ✅)");
+  const bet0 = snap.picks.find((x) => x.val === "SUR" || x.val === "VALUE");
+  ok(bj.textes.includes("BILAN — ") && bj.textes.includes("MES BETS")
+    && bj.textes.includes("PAR PROBABILITÉ") && bj.textes.includes("PAR MARCHÉ")
+    && bj.textes.includes("DÉTAIL — MES BETS") && bj.textes.includes("TESTÉS")
+    && bet0 && bj.textes.includes("✅ " + bet0.name),
+    "bilan v2 : catégories (bets/proba/marché/détail/testés) — " + (bet0 ? bet0.name + " ✅" : "?"));
+  ok(JSON.stringify(dernierClavier() || {}).includes("H:"),
+    "bilan : boutons de navigation ◀ ▶");
+  // ---- repli ESPN : l'API NHL est hors service, ESPN prend le relais ----
+  const j20 = "2026-10-20";
+  kvStore.set("prono:" + j20, { value: JSON.stringify({ ts: Date.now(), date: j20, picks: [
+    { gid: 401892550, mk: "passeur", name: "N. Acciari", id: 8477931, ab: "PHI",
+      prob: 0.62, conf: 71, pal: 4, val: "SUR" },
+    { gid: 401892550, mk: "tripleButeur", name: "X Fun", id: 1, ab: "PHI",
+      prob: 0.02, conf: 10, pal: 1, val: "PROBABLE" },
+    { gid: 401892550, mk: "buteur", name: "Y Proba", id: 2, ab: "BUF",
+      prob: 0.35, conf: 55, pal: 3, val: "PROBABLE" }] }), metadata: null });
+  global.ESPN_FIXTURE = {
+    events: [{ id: "1", competitions: [{ competitors: [
+      { team: { abbreviation: "PHI" } }, { team: { abbreviation: "BUF" } }],
+      status: { type: { completed: true } } }] }],
+    boxscore: { players: [{ statistics: [{ name: "forwards",
+      keys: ["goals", "assists"],
+      athletes: [{ athlete: { displayName: "Noel Acciari", shortName: "N. Acciari" },
+        stats: ["0", "1"] }] }] }] } };
+  const oldNHL = global.NHL; global.NHL = undefined;
+  const be = await dire("bilan " + j20);
+  global.NHL = oldNHL; global.ESPN_FIXTURE = undefined;
+  ok(!!kvStore.get("result:" + j20), "repli ESPN : jour vérifié sans l'API NHL");
+  ok(be.textes.includes("MES BETS") && be.textes.includes("✅ N. Acciari")
+    && be.textes.includes("FUN") && be.textes.includes("1/1"),
+    "repli ESPN : pick vérifié par nom, fun séparé, bets 1/1");
   const bh = await dire("bilan hier");
   ok(bh.textes.includes("pas finis") || bh.textes.includes("pas encore vérifiés"),
     "bilan hier : jour pas terminé → annoncé clairement");
