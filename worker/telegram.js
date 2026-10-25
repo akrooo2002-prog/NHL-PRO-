@@ -1149,6 +1149,22 @@ function statsJoueurTicket(p, mk) {
   }
   return parts.join(" · ");
 }
+function statsCourtesTicket(p, mk) {
+  if (!p) return "";
+  const buts = mk === "buteur" || mk === "doubleButeur";
+  const per = p.perGame || {}, form = p.form || {};
+  const saison = per[buts ? "g" : "pts"];
+  const recente = form[buts ? "g" : "pts"];
+  const parts = [];
+  if (saison != null && Number.isFinite(Number(saison))) parts.push("S" + f1(saison));
+  if ((form.n || 0) > 0 && recente != null && Number.isFinite(Number(recente)))
+    parts.push("F" + form.n + ":" + f1(recente));
+  if (mk === "doublePointeur" && p.doublePointeur && p.doublePointeur.logHit) {
+    const h = p.doublePointeur.logHit;
+    if (h.n) parts.push(h.deja + "/" + h.n);
+  }
+  return parts.join(" ");
+}
 function choixDuMatch(jeux, gid) {
   const g = jeux.find((x) => String(x.id) === String(gid));
   if (!g) return null;
@@ -1229,13 +1245,20 @@ function texteTicketHome(date, t) {
   }
   return L.join("\n");
 }
+function libelleChoixTicket(c, choix, coche) {
+  const prefix = coche ? "✓ " : "+ ";
+  const prob = Math.round(c.prob * 100) + "%";
+  if (c.mk === "duo") return prefix + "👥 DUO · " + prob;
+  const joueur = (choix.g.players || []).find((p) => String(p.id) === String(c.id));
+  const stats = statsCourtesTicket(joueur, c.mk);
+  return prefix + (BTN_MK[c.mk] || LAB_MK[c.mk] || c.mk) + " · "
+    + c.name.slice(0, 14) + " · " + prob + (stats ? " · " + stats : "");
+}
 function kbTicketMatch(etat, gid, choix, t) {
   const dans = (c) => ((t || {}).sel || []).some((x) => x.gid === c.gid && x.mk === c.mk
     && String(x.id) === String(c.id));
   const lignes = [];
-  choix.choix.forEach((c) => lignes.push([btn((dans(c) ? "✓ " : "+ ")
-    + (BTN_MK[c.mk] || LAB_MK[c.mk] || c.mk) + " · " + c.name.slice(0, 18)
-    + " · " + Math.round(c.prob * 100) + " %",
+  choix.choix.forEach((c) => lignes.push([btn(libelleChoixTicket(c, choix, dans(c)),
     "R:" + etat + ":" + c.gid + "|" + c.mk + "|" + c.id + "|" + Math.round(c.prob * 10000))]));
   lignes.push([btn("⬅️ Matchs", "N:" + etat), btn("✅ Récap", "I:" + etat)]);
   return { inline_keyboard: lignes };
@@ -1243,7 +1266,7 @@ function kbTicketMatch(etat, gid, choix, t) {
 function texteTicketMatch(date, t, choix) {
   const L = ["🎫 <b>" + choix.eqs + "</b> — " + esc(dateFr(date)),
     "<i>Choisis après comparaison : % = probabilité estimée; confiance = indice du modèle /100.</i>",
-    "<i>Stats = moyennes/match (saison et forme récente); 2+ = réussites récentes. 1 clic = 1 sélection.</i>", SEP];
+    "<i>Boutons : S = saison; F5 = forme sur 5 matchs; 2/11 = 2+ pts réussis dans 2/11 matchs. 1 clic = 1 sélection.</i>", SEP];
   const parMk = {};
   choix.choix.forEach((c) => { (parMk[c.mk] = parMk[c.mk] || []).push(c); });
   Object.keys(parMk).forEach((mk) => {

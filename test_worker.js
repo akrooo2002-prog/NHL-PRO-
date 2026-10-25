@@ -255,6 +255,10 @@ let WORKER;
     && dernierEdit().includes("BUTS · 1+ BUT") && dernierEdit().includes("saison")
     && dernierEdit().includes("derniers") && dernierEdit().includes("confiance"),
     "/ticket : choix élargis, catégories, stats saison/forme et confiance visibles");
+  ok(boutonsChoix.some((b) => /S[0-9]/.test(b.text))
+    && boutonsChoix.some((b) => /F[0-9]+:/.test(b.text))
+    && boutonsChoix.every((b) => b.text.length <= 64),
+    "/ticket : stats saison/forme lisibles directement sur les boutons (≤64 caractères)");
   ok(!cq.clavier.inline_keyboard.flat().some((b) => /2\+ tirs|tirs cadrés/i.test(b.text)),
     "ticket : aucun marché de tirs indisponible sur Winamax");
   const rBtn = boutonsChoix[0];
