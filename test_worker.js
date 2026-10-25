@@ -252,8 +252,9 @@ let WORKER;
   ok(dernierEdit().includes("1 clic = 1 sélection"), "ticket : feuille de match (choix par marché)");
   const boutonsChoix = cq.clavier.inline_keyboard.flat().filter((b) => b.callback_data.startsWith("R:"));
   ok(boutonsChoix.length >= 10 && dernierEdit().includes("POINTS · 1+ POINT")
-    && dernierEdit().includes("BUTS · 1+ BUT"),
-    "/ticket : plus de choix par match et catégories buts/points visibles");
+    && dernierEdit().includes("BUTS · 1+ BUT") && dernierEdit().includes("saison")
+    && dernierEdit().includes("derniers") && dernierEdit().includes("confiance"),
+    "/ticket : choix élargis, catégories, stats saison/forme et confiance visibles");
   ok(!cq.clavier.inline_keyboard.flat().some((b) => /2\+ tirs|tirs cadrés/i.test(b.text)),
     "ticket : aucun marché de tirs indisponible sur Winamax");
   const rBtn = boutonsChoix[0];
@@ -271,13 +272,14 @@ let WORKER;
   const iBtn1 = cq.clavier.inline_keyboard.flat().find((b) => b.callback_data.startsWith("I:"));
   await clique(iBtn1.callback_data);
   ok(dernierEdit().includes("MON TICKET") && dernierEdit().includes("PROBABILITÉ COMBINÉE")
-    && dernierEdit().includes("POINTS · 1+ POINT") && dernierEdit().includes("Recopie dans Winamax"),
-    "ticket : récap affiche clairement catégorie points/buts + proba combinée");
+    && dernierEdit().includes("POINTS · 1+ POINT") && dernierEdit().includes("📊 saison")
+    && dernierEdit().includes("confiance") && dernierEdit().includes("Recopie dans Winamax"),
+    "ticket : récap catégorie, stats et confiance + proba combinée");
   const jBtn = kbTk.inline_keyboard.flat().find((b) => /^J:.*:s$/.test(b.callback_data));
   const cj = await clique(jBtn.callback_data);
   ok(dernierEdit().includes("Ticket chargé") && dernierEdit().includes("3.")
-    && dernierEdit().includes("PROBABILITÉ COMBINÉE"),
-    "ticket SÛR préconstruit : 3 jambes + récap");
+    && dernierEdit().includes("PROBABILITÉ COMBINÉE") && dernierEdit().includes("📊 saison"),
+    "ticket SÛR préconstruit : 3 jambes avec stats + récap");
   const eBtn = cj.clavier.inline_keyboard.flat().find((b) => b.callback_data.startsWith("E:"));
   await clique(eBtn.callback_data);
   ok(dernierEdit().includes("Ticket vide"), "ticket : 🗑 vider");

@@ -781,8 +781,8 @@ function rowsMarche(jeux, mk) {
   } else {
     jeux.forEach((g) => ["away", "home"].forEach((side) => {
       (g.players || []).filter((p) => p.abbr === g[side] && p[mk] && p[mk].rank && p[mk].rank <= 2)
-        .forEach((p) => rows.push({ prob: p[mk].prob, news: p.news, g,
-          txt: esc(p.name) + " — " + eq(p.abbr) + " @ " + eq(p.opp) }));
+        .forEach((p) => rows.push({ prob: p[mk].prob, conf: p[mk].confidence, player: p,
+          news: p.news, g, txt: esc(p.name) + " — " + eq(p.abbr) + " @ " + eq(p.opp) }));
     }));
   }
   rows.sort((a, b) => b.prob - a.prob);
@@ -1010,6 +1010,7 @@ async function traite(text, chatId) {
     const dateT = jourDefaut(d);
     const jeuxT = await jourAdapte(dateT, d);
     const t = await ticketLoad(chatId);
+    enrichTicket(t, jeuxT);
     CLAVIER_REP = kbTicketHome(encodeEtat([], dates(d).indexOf(dateT)), jeuxT, t);
     return [texteTicketHome(dateT, t)];
   }
@@ -1129,6 +1130,25 @@ const BTN_MK = { buteur: "⚽ BUTS 1+", pointeur: "📈 POINTS 1+", passeur: "�
 const descape = (t) => String(t).replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
 const FAMILLE_MK = { buteur: "G", doubleButeur: "G", tripleButeur: "G",
   pointeur: "P", passeur: "P", doublePointeur: "P", triplePointeur: "P" };
+function statsJoueurTicket(p, mk) {
+  if (!p) return "";
+  const per = p.perGame || {}, forme = p.form || {};
+  const buts = mk === "buteur" || mk === "doubleButeur";
+  const rawSaison = per[buts ? "g" : "pts"], rawForme = forme[buts ? "g" : "pts"];
+  const valeurSaison = rawSaison == null ? NaN : Number(rawSaison);
+  const valeurForme = rawForme == null ? NaN : Number(rawForme);
+  const unite = buts ? "but/m" : "pt/m";
+  const parts = [];
+  if (Number.isFinite(valeurSaison)) parts.push("saison " + f1(valeurSaison) + " " + unite
+    + ((p.gp || 0) ? " sur " + p.gp + " matchs" : ""));
+  if ((forme.n || 0) > 0 && Number.isFinite(valeurForme))
+    parts.push(forme.n + " derniers " + f1(valeurForme) + " " + unite);
+  if (mk === "doublePointeur" && p.doublePointeur && p.doublePointeur.logHit) {
+    const h = p.doublePointeur.logHit;
+    if (h.n) parts.push("2+ pts dans " + h.deja + "/" + h.n + " matchs récents");
+  }
+  return parts.join(" · ");
+}
 function choixDuMatch(jeux, gid) {
   const g = jeux.find((x) => String(x.id) === String(gid));
   if (!g) return null;
@@ -1138,14 +1158,30 @@ function choixDuMatch(jeux, gid) {
     .filter((p) => p[mk] && p[mk].rank && p[mk].rank <= n && !(p.flags || []).includes("absent"))
     .sort((a, b) => a[mk].rank - b[mk].rank).slice(0, n)
     .forEach((p) => out.push({ gid: String(gid), eq: eqs, mk, id: p.id,
-      name: p.name, prob: p[mk].prob }));
+      name: p.name, prob: p[mk].prob, conf: p[mk].confidence, stats: statsJoueurTicket(p, mk) }));
   // 5 choix 1+ point et 5 choix 1+ but, plus 3 options 2+ points :
   // assez de variété sans ouvrir la sélection à tout l'effectif.
   top("pointeur", 5); top("buteur", 5); top("doublePointeur", 3);
   const cb = (g.combos || {}).mixte && g.combos.mixte.double;
-  if (cb && cb.members) out.push({ gid: String(gid), eq: eqs, mk: "duo", id: 0,
-    name: cb.members.map((x) => x.name).join(" + "), prob: cb.prob });
+  if (cb && cb.members) {
+    const membres = cb.members.map((x) => {
+      const p = (g.players || []).find((y) => String(y.id) === String(x.id));
+      return p ? x.name + ": " + statsJoueurTicket(p, "buteur") : x.name;
+    });
+    out.push({ gid: String(gid), eq: eqs, mk: "duo", id: 0,
+      name: cb.members.map((x) => x.name).join(" + "), prob: cb.prob,
+      conf: cb.confidence, stats: membres.join(" · ") });
+  }
   return { g, eqs, choix: out };
+}
+function enrichTicket(t, jeux) {
+  t.sel = (t.sel || []).map((x) => {
+    if (x.stats && x.conf != null) return x;
+    const src = choixDuMatch(jeux, x.gid);
+    const candidat = src && src.choix.find((c) => c.mk === x.mk && String(c.id) === String(x.id));
+    return candidat ? Object.assign({}, x, { stats: candidat.stats, conf: candidat.conf }) : x;
+  });
+  return t;
 }
 const probaTicket = (sel) => {
   const jeuxVus = new Set(sel.map((x) => x.gid));
@@ -1159,8 +1195,14 @@ function noteTicket(p) {
   return "🧭 Très audacieux — ticket loterie";
 }
 function lignesTicket(sel) {
-  return sel.map((x, i) => " " + (i + 1) + ". " + esc(x.name) + " — " + x.eq + " · "
-    + (ICO_MK[x.mk] || "") + " " + (LAB_MK[x.mk] || x.mk) + " · <b>" + pct(x.prob) + "</b>");
+  return sel.map((x, i) => {
+    const conf = x.conf != null && Number.isFinite(Number(x.conf))
+      ? " · confiance " + f1(x.conf) + "/100" : "";
+    const stats = x.stats ? "\n    <i>📊 " + esc(x.stats) + "</i>" : "";
+    return " " + (i + 1) + ". " + esc(x.name) + " — " + x.eq + " · "
+      + (ICO_MK[x.mk] || "") + " " + (LAB_MK[x.mk] || x.mk) + " · <b>" + pct(x.prob) + "</b>"
+      + conf + stats;
+  });
 }
 function kbTicketHome(etat, jeux, t) {
   const lignes = [];
@@ -1200,12 +1242,17 @@ function kbTicketMatch(etat, gid, choix, t) {
 }
 function texteTicketMatch(date, t, choix) {
   const L = ["🎫 <b>" + choix.eqs + "</b> — " + esc(dateFr(date)),
-    "<i>1 clic = 1 sélection dans le ticket.</i>", SEP];
+    "<i>Choisis après comparaison : % = probabilité estimée; confiance = indice du modèle /100.</i>",
+    "<i>Stats = moyennes/match (saison et forme récente); 2+ = réussites récentes. 1 clic = 1 sélection.</i>", SEP];
   const parMk = {};
   choix.choix.forEach((c) => { (parMk[c.mk] = parMk[c.mk] || []).push(c); });
   Object.keys(parMk).forEach((mk) => {
     L.push((ICO_MK[mk] || "") + " <b>" + (LAB_MK[mk] || mk) + "</b>");
-    parMk[mk].forEach((c) => L.push("  • " + esc(c.name) + " · <b>" + pct(c.prob) + "</b>"));
+    parMk[mk].forEach((c) => {
+      const conf = c.conf != null ? " · confiance " + f1(c.conf) + "/100" : "";
+      L.push("  • " + esc(c.name) + " · <b>" + pct(c.prob) + "</b>" + conf
+        + (c.stats ? "\n    📊 " + esc(c.stats) : ""));
+    });
   });
   L.push("", SEP, "🎫 Ticket : " + t.sel.length + " sélection" + (t.sel.length > 1 ? "s" : "")
     + (t.sel.length ? " · ≈ <b>" + pct(probaTicket(t.sel)) + "</b>" : ""));
@@ -1220,7 +1267,8 @@ function mesTickets(profil, jeux) {
   const buts = uniq(rowsMarche(jeux, "buteur").filter(pasPiege));
   const p2 = uniq(rowsMarche(jeux, "doublePointeur").filter(pasPiege));
   const enSel = (r, mk) => ({ gid: String(r.g.id), eq: eq(r.g.away) + " @ " + eq(r.g.home),
-    mk, id: 0, name: descape(r.txt.replace(/ —.*$/, "")), prob: r.prob });
+    mk, id: 0, name: descape(r.txt.replace(/ —.*$/, "")), prob: r.prob,
+    conf: r.conf, stats: statsJoueurTicket(r.player, mk) });
   if (profil === "s") return pts.slice(0, 3).map((r) => enSel(r, "pointeur"));
   if (profil === "e") return [...pts.slice(0, 2).map((r) => enSel(r, "pointeur")),
     ...buts.slice(0, 1).map((r) => enSel(r, "buteur"))];
@@ -1306,6 +1354,7 @@ async function traiteCallback(data, d, chatId) {
       || cmd === "I" || cmd === "E") {
     const jeux = await jourAdapte(date, d);
     const t = await ticketLoad(chatId);
+    enrichTicket(t, jeux);
     if (cmd === "E") {
       await ticketSave(chatId, { date, sel: [] });
       return { edit: { texte: texteTicketHome(date, { sel: [] }), clavier: kbTicketHome(etat, jeux, { sel: [] }) } };
