@@ -80,6 +80,7 @@ const AIDE =
   "/bilan — 📊 bilan de la veille : mes bets ✅🔥 par confiance et probabilité, fun séparé, navigation jour par jour ◀ ▶\n" +
   "/pick — 🎯 MES CHOIX : un nom par marché, direct\n" +
   "/combi — 🎰 combinés (SÛR · BUTS · JACKPOT) + MyMatch même match\n" +
+  "/ticket — 🎫 construis ton combiné : match par match, joueur par joueur\n" +
   "/classement — 📊 % décroissant, marché au choix par boutons\n" +
   "/refresh — 🔄 gardiens revérifiés + analyses réadaptées\n" +
   "/news — 📰 actus NHL en direct (blessures, compos)\n" +
@@ -158,6 +159,7 @@ function kbMenu(etat, d) {
     [btn("📊 Bilan", "B:" + etat), btn("❓ Aide", "A")],
     [btn("🎯 Mes picks", "X:" + etat), btn("🎰 Combinés", "V:" + etat)],
     [btn("📊 Classement %", "C:" + etat), btn("🔄 Refresh", "W:" + etat)],
+    [btn("🎫 Mon ticket", "N:" + etat)],
   ] };
 }
 function kbFiltres(etat) {
@@ -1027,7 +1029,7 @@ async function fluxRefresh(d) {
 
 /* ---------- réponse complète ---------- */
 let CLAVIER_REP = null;   // clavier demandé par la réponse texte (ex. /classement)
-async function traite(text) {
+async function traite(text, chatId) {
   const d = await index();
   const gm = String(text || "").trim().match(/^\/?gardiens?\s*(.*)$/i);
   if (gm) return fluxGardien(gm[1].trim(), d);
@@ -1037,6 +1039,13 @@ async function traite(text) {
     return fluxNews();
   const tx = String(text || "").trim();
   if (/^\/?(refresh|maj|rafrai?chi?r?|rafraîchir?)$/i.test(tx)) return await fluxRefresh(d);
+  if (/^\/?(ticket|tickets|monticket|bet slip|slip)$/i.test(tx)) {
+    const dateT = jourDefaut(d);
+    const jeuxT = await jourAdapte(dateT, d);
+    const t = await ticketLoad(chatId);
+    CLAVIER_REP = kbTicketHome(encodeEtat([], dates(d).indexOf(dateT)), jeuxT, t);
+    return [texteTicketHome(dateT, t)];
+  }
   if (/^\/?(combi|combis|combiné|combine|combinaison|jackpot|mymatch)$/i.test(tx)) {
     const dateC = jourDefaut(d);
     return fluxCombi(dateC, await jourAdapte(dateC, d));
@@ -1129,8 +1138,135 @@ function blocTop(date, jeux, marches) {
   return L.join("\n");
 }
 
+/* ---------- 🎫 TICKETS : construis ton combiné dans Telegram ----------
+   Sélections stockées en KV par chat (3 jours). On peut tout combiner sauf
+   deux marchés contradictoires du MÊME joueur (2+ points couvre 1+ point). */
+const TICKET_TTL = 3 * 86400;
+const ticketLoad = async (chatId) => (ENV.GARDIENS
+  && (await ENV.GARDIENS.get("ticket:" + chatId, "json").catch(() => null))) || { sel: [] };
+async function ticketSave(chatId, t) {
+  if (ENV.GARDIENS) await ENV.GARDIENS.put("ticket:" + chatId, JSON.stringify(t),
+    { expirationTtl: TICKET_TTL }).catch(() => {});
+}
+const ICO_MK = { buteur: "⚡", pointeur: "📈", passeur: "🅰️", doubleButeur: "⚡⚡",
+  doublePointeur: "✨", tirs: "🎯", duo: "👥" };
+const LAB_MK = { buteur: "1+ but", pointeur: "1+ point", passeur: "1+ passe",
+  doubleButeur: "2+ buts", doublePointeur: "2+ points", tirs: "2+ tirs", duo: "duo 1+ but" };
+const descape = (t) => String(t).replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+const FAMILLE_MK = { buteur: "G", doubleButeur: "G", tripleButeur: "G",
+  pointeur: "P", passeur: "P", doublePointeur: "P", triplePointeur: "P", tirs: "T" };
+function choixDuMatch(jeux, gid) {
+  const g = jeux.find((x) => String(x.id) === String(gid));
+  if (!g) return null;
+  const eqs = eq(g.away) + " @ " + eq(g.home);
+  const out = [];
+  const top = (mk, n) => (g.players || [])
+    .filter((p) => p[mk] && p[mk].rank && p[mk].rank <= n && !(p.flags || []).includes("absent"))
+    .sort((a, b) => a[mk].rank - b[mk].rank).slice(0, n)
+    .forEach((p) => out.push({ gid: String(gid), eq: eqs, mk, id: p.id,
+      name: p.name, prob: p[mk].prob }));
+  top("pointeur", 2); top("buteur", 2); top("doublePointeur", 1);
+  rowsTirs([g]).slice(0, 1).forEach((r) =>
+    out.push({ gid: String(gid), eq: eqs, mk: "tirs", id: 0,
+      name: descape(r.txt.replace(/ @.*$/, "")), prob: r.prob }));
+  const cb = (g.combos || {}).mixte && g.combos.mixte.double;
+  if (cb && cb.members) out.push({ gid: String(gid), eq: eqs, mk: "duo", id: 0,
+    name: cb.members.map((x) => x.name).join(" + "), prob: cb.prob });
+  return { g, eqs, choix: out };
+}
+const probaTicket = (sel) => {
+  const jeuxVus = new Set(sel.map((x) => x.gid));
+  const corr = Math.pow(0.95, Math.max(0, sel.length - jeuxVus.size));
+  return sel.reduce((a, x) => a * (x.prob || 0), 1) * (sel.length ? corr : 1);
+};
+function noteTicket(p) {
+  if (p >= 0.5) return "🧭 Solide — confiance justifiée";
+  if (p >= 0.25) return "🧭 Équilibré — mise standard";
+  if (p >= 0.1) return "🧭 Audacieux — petite mise";
+  return "🧭 Très audacieux — ticket loterie";
+}
+function lignesTicket(sel) {
+  return sel.map((x, i) => " " + (i + 1) + ". " + esc(x.name) + " — " + x.eq + " · "
+    + (ICO_MK[x.mk] || "") + " " + (LAB_MK[x.mk] || x.mk) + " · <b>" + pct(x.prob) + "</b>");
+}
+function kbTicketHome(etat, jeux, t) {
+  const lignes = [];
+  ((t || {}).sel || []).forEach((x, i) => lignes.push([btn("✂️ " + (i + 1) + ". "
+    + x.name.slice(0, 24) + " " + (ICO_MK[x.mk] || ""), "U:" + etat + ":" + i)]));
+  for (let i = 0; i < jeux.length; i += 2)
+    lignes.push(jeux.slice(i, i + 2).map((g) => btn(eq(g.away) + " @ " + eq(g.home),
+      "Q:" + etat + ":" + g.id)));
+  lignes.push([btn("🔒 Mon ticket SÛR", "J:" + etat + ":s"),
+               btn("⚖️ Équilibré", "J:" + etat + ":e"),
+               btn("💎 Jackpot", "J:" + etat + ":j")]);
+  lignes.push([btn("✅ Récapitulatif", "I:" + etat), btn("🗑 Vider", "E:" + etat)]);
+  return { inline_keyboard: lignes };
+}
+function texteTicketHome(date, t) {
+  const L = ["🎫 <b>TICKET — " + esc(dateFr(date)) + "</b>"];
+  if (t.sel.length) {
+    L.push(SEP, "<b>MES SÉLECTIONS</b> — " + t.sel.length + " pari" + (t.sel.length > 1 ? "s" : ""));
+    L.push(...lignesTicket(t.sel));
+    L.push("", "📊 Proba combinée ≈ <b>" + pct(probaTicket(t.sel)) + "</b>"
+      + "  ·  <i>✂️ pour retirer</i>");
+  } else {
+    L.push("", "<i>Ticket vide — choisis un match 👇 puis tes joueurs.</i>");
+  }
+  return L.join("\n");
+}
+function kbTicketMatch(etat, gid, choix, t) {
+  const dans = (c) => ((t || {}).sel || []).some((x) => x.gid === c.gid && x.mk === c.mk
+    && String(x.id) === String(c.id));
+  const lignes = [];
+  choix.choix.forEach((c) => lignes.push([btn((dans(c) ? "✓ " : "+ ") + c.name.slice(0, 26) + " "
+    + (ICO_MK[c.mk] || "") + " " + Math.round(c.prob * 100) + " %",
+    "R:" + etat + ":" + c.gid + "|" + c.mk + "|" + c.id + "|" + Math.round(c.prob * 10000))]));
+  lignes.push([btn("⬅️ Matchs", "N:" + etat), btn("✅ Récap", "I:" + etat)]);
+  return { inline_keyboard: lignes };
+}
+function texteTicketMatch(date, t, choix) {
+  const L = ["🎫 <b>" + choix.eqs + "</b> — " + esc(dateFr(date)),
+    "<i>1 clic = 1 sélection dans le ticket.</i>", SEP];
+  const parMk = {};
+  choix.choix.forEach((c) => { (parMk[c.mk] = parMk[c.mk] || []).push(c); });
+  Object.keys(parMk).forEach((mk) => {
+    L.push((ICO_MK[mk] || "") + " <b>" + (LAB_MK[mk] || mk) + "</b>");
+    parMk[mk].forEach((c) => L.push("  • " + esc(c.name) + " · <b>" + pct(c.prob) + "</b>"));
+  });
+  L.push("", SEP, "🎫 Ticket : " + t.sel.length + " sélection" + (t.sel.length > 1 ? "s" : "")
+    + (t.sel.length ? " · ≈ <b>" + pct(probaTicket(t.sel)) + "</b>" : ""));
+  return L.join("\n");
+}
+function mesTickets(profil, jeux) {
+  const piege = new Set(jeux.filter((g) => g.piege).map((g) => String(g.id)));
+  const pasPiege = (r) => r.g && !piege.has(String(r.g.id));
+  const uniq = (rows) => { const vus = new Set(); return rows.filter((r) => {
+    const k = String(r.g.id); if (vus.has(k)) return false; vus.add(k); return true; }); };
+  const pts = uniq(rowsMarche(jeux, "pointeur").filter(pasPiege));
+  const buts = uniq(rowsMarche(jeux, "buteur").filter(pasPiege));
+  const p2 = uniq(rowsMarche(jeux, "doublePointeur").filter(pasPiege));
+  const enSel = (r, mk) => ({ gid: String(r.g.id), eq: eq(r.g.away) + " @ " + eq(r.g.home),
+    mk, id: 0, name: descape(r.txt.replace(/ —.*$/, "")), prob: r.prob });
+  if (profil === "s") return pts.slice(0, 3).map((r) => enSel(r, "pointeur"));
+  if (profil === "e") return [...pts.slice(0, 2).map((r) => enSel(r, "pointeur")),
+    ...buts.slice(0, 1).map((r) => enSel(r, "buteur"))];
+  const jk = [];
+  p2.slice(0, 2).forEach((r) => jk.push(enSel(r, "doublePointeur")));
+  buts.forEach((r) => { if (jk.length < 3 && !jk.some((x) => x.gid === String(r.g.id))) jk.push(enSel(r, "buteur")); });
+  return jk;
+}
+function texteTicketRecap(date, t) {
+  if (!t.sel.length) return "🎫 Ticket vide — ajoute des sélections d'abord (bouton 🎫 Ticket du menu).";
+  const p = probaTicket(t.sel);
+  return ["🎫 <b>MON TICKET — " + esc(dateFr(date)) + "</b>", SEP,
+    ...lignesTicket(t.sel), "", SEP,
+    "📊 <b>PROBABILITÉ COMBINÉE ≈ " + pct(p) + "</b>",
+    noteTicket(p), "",
+    "<i>Recopie dans Winamax dans le même ordre.</i>"].join("\n");
+}
+
 /* ---------- navigation par boutons ---------- */
-async function traiteCallback(data, d) {
+async function traiteCallback(data, d, chatId) {
   const ds = dates(d);
   const [cmd, etat, extra] = String(data).split(":");
   const { codes, jourIdx } = decodeEtat(etat);
@@ -1191,6 +1327,50 @@ async function traiteCallback(data, d) {
   }
   if (cmd === "W") {
     return { envoie: await fluxRefresh(d), clavier: kbMenu(etat, d) };
+  }
+  if (cmd === "N" || cmd === "Q" || cmd === "R" || cmd === "U" || cmd === "J"
+      || cmd === "I" || cmd === "E") {
+    const jeux = await jourAdapte(date, d);
+    const t = await ticketLoad(chatId);
+    if (cmd === "E") {
+      await ticketSave(chatId, { date, sel: [] });
+      return { edit: { texte: texteTicketHome(date, { sel: [] }), clavier: kbTicketHome(etat, jeux, { sel: [] }) } };
+    }
+    if (cmd === "J") {
+      t.date = date; t.sel = mesTickets(extra, jeux);
+      await ticketSave(chatId, t);
+      return { edit: { texte: texteTicketRecap(date, t) + "\n\n<i>Ticket chargé — « ⬅️ Modifier » pour changer une jambe.</i>",
+        clavier: { inline_keyboard: [[btn("⬅️ Modifier", "N:" + etat), btn("🗑 Vider", "E:" + etat)]] } } };
+    }
+    if (cmd === "I")
+      return { edit: { texte: texteTicketRecap(date, t),
+        clavier: { inline_keyboard: [[btn("⬅️ Modifier", "N:" + etat), btn("🗑 Vider", "E:" + etat)]] } } };
+    if (cmd === "R") {
+      const [gid, mk, id, prob10k] = String(extra).split("|");
+      const src = choixDuMatch(jeux, gid);
+      const c = src && src.choix.find((x) => x.mk === mk && String(x.id) === String(id));
+      if (c) {
+        const conflit = mk !== "duo" && t.sel.some((x) => String(x.id) === String(id)
+          && x.id !== 0 && FAMILLE_MK[x.mk] === FAMILLE_MK[mk]);
+        const deja = t.sel.some((x) => x.gid === gid && x.mk === mk && String(x.id) === String(id));
+        if (deja) return { alert: "Déjà dans le ticket.", edit: { texte: texteTicketMatch(date, t, src), clavier: kbTicketMatch(etat, gid, src, t) } };
+        if (conflit) return { alert: "❌ Marchés contradictoires : un même joueur ne peut pas avoir deux marchés de buts (ou de points) dans le ticket.", edit: { texte: texteTicketMatch(date, t, src), clavier: kbTicketMatch(etat, gid, src, t) } };
+        t.date = date; t.sel.push(c);
+        await ticketSave(chatId, t);
+      }
+      return { edit: { texte: texteTicketMatch(date, t, src), clavier: kbTicketMatch(etat, gid, src, t) } };
+    }
+    if (cmd === "U") {
+      t.sel.splice(parseInt(extra, 10), 1);
+      await ticketSave(chatId, t);
+      return { edit: { texte: texteTicketHome(date, t), clavier: kbTicketHome(etat, jeux, t) } };
+    }
+    if (cmd === "Q") {
+      const src = choixDuMatch(jeux, extra);
+      if (!src) return { edit: { texte: texteTicketHome(date, t), clavier: kbTicketHome(etat, jeux, t) } };
+      return { edit: { texte: texteTicketMatch(date, t, src), clavier: kbTicketMatch(etat, src.gid, src, t) } };
+    }
+    return { edit: { texte: texteTicketHome(date, t), clavier: kbTicketHome(etat, jeux, t) } };
   }
   if (cmd === "H") {
     const arg = String(etat || "");
@@ -1580,6 +1760,9 @@ export default {
     if (request.method === "GET") {
       const u = new URL(request.url);
       if (u.pathname === "/verifs" && ENV.GARDIENS) {
+        // le pipeline CI passe ici toutes les 2 h : on en profite pour vérifier
+        // les résultats en arrière-plan (le cron CF peut sauter, pas la CI).
+        if (ctx && ctx.waitUntil) { try { ctx.waitUntil(majBilan(null, true)); } catch (e) { /* tant pis */ } }
         const picks = [];
         let cursor;
         do {
@@ -1612,7 +1795,10 @@ export default {
       try {
         await tg("answerCallbackQuery", { callback_query_id: cbq.id });
         const d = await index();
-        const res = await traiteCallback(cbq.data, d);
+        const res = await traiteCallback(cbq.data, d, cbq.message.chat.id);
+        if (res.alert) {
+          try { await tg("answerCallbackQuery", { callback_query_id: cbq.id, text: res.alert, show_alert: true }); } catch (e) { /* tant pis */ }
+        }
         if (res.edit) {
           await tg("editMessageText", {
             chat_id: cbq.message.chat.id, message_id: cbq.message.message_id,
@@ -1646,7 +1832,7 @@ export default {
         await envoie(msg.chat.id, [accueilTexte(d, etat)], kbMenu(etat, d));
         return j(200, { ok: true, menu: true });
       }
-      const morceaux = await traite(msg.text);
+      const morceaux = await traite(msg.text, msg.chat.id);
       const clav = CLAVIER_REP; CLAVIER_REP = null;
       await envoie(msg.chat.id, morceaux, clav || undefined);
       return j(200, { ok: true, reponses: morceaux.length });
