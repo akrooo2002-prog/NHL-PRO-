@@ -238,9 +238,9 @@ let WORKER;
   ok(cb.morceaux === 1 && cb.textes.includes("COMBINÉS")
      && cb.textes.includes("PROFIL SÛR") && cb.textes.includes("PROFIL ÉQUILIBRÉ")
      && cb.textes.includes("PROFIL JACKPOT") && cb.textes.includes("×3")
-     && cb.textes.includes("TIRS CADRÉS") && cb.textes.includes("MYMATCH")
+     && !cb.textes.includes("TIRS CADRÉS") && cb.textes.includes("MYMATCH")
      && !/[★☆]/.test(cb.textes),
-    "/combi : 3 profils ×2/×3/×5 + tirs + MyMatch en 1 message");
+    "/combi : 3 profils ×2/×3/×5 + MyMatch, sans marchés de tirs");
   // ---------- 🎫 ticket : construction au clic, conflit, récap ----------
   const dernierEdit = () => { const e = editions(); return e.length ? String(e[e.length - 1].text || "") : ""; };
   const tk0 = await dire("ticket");
@@ -250,6 +250,8 @@ let WORKER;
   const qBtn = kbTk.inline_keyboard.flat().find((b) => b.callback_data.startsWith("Q:"));
   const cq = await clique(qBtn.callback_data);
   ok(dernierEdit().includes("1 clic = 1 sélection"), "ticket : feuille de match (choix par marché)");
+  ok(!cq.clavier.inline_keyboard.flat().some((b) => /2\+ tirs|tirs cadrés/i.test(b.text)),
+    "ticket : aucun marché de tirs indisponible sur Winamax");
   const rBtn = cq.clavier.inline_keyboard.flat().find((b) => b.callback_data.startsWith("R:"));
   await clique(rBtn.callback_data);
   ok(dernierEdit().includes("Ticket : 1 sélection"), "ticket : 1 clic = 1 sélection ajoutée");

@@ -904,38 +904,11 @@ function fluxPick(date, jeux) {
   return [L.join("\n")];
 }
 
-/* ---------- 🎰 COMBINÉS : 3 profils, tailles ×2/×3/×5, tirs, MyMatch ----------
+/* ---------- 🎰 COMBINÉS : 3 profils, tailles ×2/×3/×5, MyMatch ----------
    Maths honnêtes : un combiné MULTIPLIE les probabilités (et les gains).
    - entre matchs différents → indépendance réelle, produit exact ;
    - même match (MyMatch) → corrélation, produit minoré de 5 %.
    Les matchs pièges sont exclus des profils. */
-function poissonSup(lam, n) {          // P(X ≥ n), X ~ Poisson(lam)
-  let somme = 0, terme = Math.exp(-lam);
-  for (let i = 0; i < n; i++) { if (i) terme *= lam / i; somme += terme; }
-  return Math.max(0, Math.min(1, 1 - somme));
-}
-function rowsTirs(jeux) {              // tirs cadrés : λ = tirs/match × contexte adverse
-  const sas = [];
-  jeux.forEach((g) => ["away", "home"].forEach((sd) => {
-    const v = ((g.ctx || {})[sd] || {}).oppSa;
-    if (v) sas.push(v);
-  }));
-  const moy = sas.length ? sas.reduce((a, b) => a + b, 0) / sas.length : 30;
-  const rows = [];
-  jeux.forEach((g) => {
-    (g.players || []).forEach((p) => {
-      const sh = (p.perGame || {}).sh;
-      if (!sh || (p.flags || []).includes("absent") || (p.gp || 0) < 5) return;
-      const cote = g.away === p.opp ? "home" : "away";
-      const f = Math.max(0.85, Math.min(1.2, (((g.ctx || {})[cote] || {}).oppSa || moy) / moy));
-      const lam = sh * f;
-      rows.push({ prob: poissonSup(lam, 2), prob3: poissonSup(lam, 3), g,
-        txt: esc(p.name) + " " + eq(p.abbr) + " @ " + eq(p.opp) });
-    });
-  });
-  rows.sort((a, b) => b.prob - a.prob);
-  return rows;
-}
 function fluxCombi(date, jeux) {
   const piege = new Set(jeux.filter((g) => g.piege).map((g) => String(g.id)));
   const pasPiege = (r) => r.g && !piege.has(String(r.g.id));
@@ -972,12 +945,6 @@ function fluxCombi(date, jeux) {
     if (jk.length < 5 && n < max && autreMatch(jk, r)) { jk.push(r); n++; } }); };
   prends(p2, 3); prends(p3, 1); prends(buts, 2);
   profil("💎", "PROFIL JACKPOT · 2+/3+ points & buts", jk);
-  const tirs = uniq(rowsTirs(jeux).filter(pasPiege)).slice(0, 3);
-  if (tirs.length) {
-    L.push("🎯 <b>TIRS CADRÉS</b> <i>(ajoutable à tes combinés)</i>");
-    tirs.forEach((r) => L.push(" • " + r.txt + " — 2+ : <b>" + pct(r.prob) + "</b> · 3+ : " + pct(r.prob3)));
-    L.push("");
-  }
   const mm = [];
   jeux.forEach((g) => {
     const pl = (g.players || []).find((p) => p.pointeur && p.pointeur.rank === 1);
@@ -1142,19 +1109,24 @@ function blocTop(date, jeux, marches) {
    Sélections stockées en KV par chat (3 jours). On peut tout combiner sauf
    deux marchés contradictoires du MÊME joueur (2+ points couvre 1+ point). */
 const TICKET_TTL = 3 * 86400;
-const ticketLoad = async (chatId) => (ENV.GARDIENS
-  && (await ENV.GARDIENS.get("ticket:" + chatId, "json").catch(() => null))) || { sel: [] };
+const ticketLoad = async (chatId) => {
+  const t = (ENV.GARDIENS
+    && (await ENV.GARDIENS.get("ticket:" + chatId, "json").catch(() => null))) || { sel: [] };
+  // Ignore old stored shot selections: this market is not offered on Winamax.
+  t.sel = (t.sel || []).filter((x) => x.mk !== "tirs");
+  return t;
+};
 async function ticketSave(chatId, t) {
   if (ENV.GARDIENS) await ENV.GARDIENS.put("ticket:" + chatId, JSON.stringify(t),
     { expirationTtl: TICKET_TTL }).catch(() => {});
 }
 const ICO_MK = { buteur: "⚡", pointeur: "📈", passeur: "🅰️", doubleButeur: "⚡⚡",
-  doublePointeur: "✨", tirs: "🎯", duo: "👥" };
+  doublePointeur: "✨", duo: "👥" };
 const LAB_MK = { buteur: "1+ but", pointeur: "1+ point", passeur: "1+ passe",
-  doubleButeur: "2+ buts", doublePointeur: "2+ points", tirs: "2+ tirs", duo: "duo 1+ but" };
+  doubleButeur: "2+ buts", doublePointeur: "2+ points", duo: "duo 1+ but" };
 const descape = (t) => String(t).replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
 const FAMILLE_MK = { buteur: "G", doubleButeur: "G", tripleButeur: "G",
-  pointeur: "P", passeur: "P", doublePointeur: "P", triplePointeur: "P", tirs: "T" };
+  pointeur: "P", passeur: "P", doublePointeur: "P", triplePointeur: "P" };
 function choixDuMatch(jeux, gid) {
   const g = jeux.find((x) => String(x.id) === String(gid));
   if (!g) return null;
@@ -1166,9 +1138,6 @@ function choixDuMatch(jeux, gid) {
     .forEach((p) => out.push({ gid: String(gid), eq: eqs, mk, id: p.id,
       name: p.name, prob: p[mk].prob }));
   top("pointeur", 2); top("buteur", 2); top("doublePointeur", 1);
-  rowsTirs([g]).slice(0, 1).forEach((r) =>
-    out.push({ gid: String(gid), eq: eqs, mk: "tirs", id: 0,
-      name: descape(r.txt.replace(/ @.*$/, "")), prob: r.prob }));
   const cb = (g.combos || {}).mixte && g.combos.mixte.double;
   if (cb && cb.members) out.push({ gid: String(gid), eq: eqs, mk: "duo", id: 0,
     name: cb.members.map((x) => x.name).join(" + "), prob: cb.prob });
