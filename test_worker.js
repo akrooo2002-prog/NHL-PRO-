@@ -250,9 +250,13 @@ let WORKER;
   const qBtn = kbTk.inline_keyboard.flat().find((b) => b.callback_data.startsWith("Q:"));
   const cq = await clique(qBtn.callback_data);
   ok(dernierEdit().includes("1 clic = 1 sélection"), "ticket : feuille de match (choix par marché)");
+  const boutonsChoix = cq.clavier.inline_keyboard.flat().filter((b) => b.callback_data.startsWith("R:"));
+  ok(boutonsChoix.length >= 10 && dernierEdit().includes("POINTS · 1+ POINT")
+    && dernierEdit().includes("BUTS · 1+ BUT"),
+    "/ticket : plus de choix par match et catégories buts/points visibles");
   ok(!cq.clavier.inline_keyboard.flat().some((b) => /2\+ tirs|tirs cadrés/i.test(b.text)),
     "ticket : aucun marché de tirs indisponible sur Winamax");
-  const rBtn = cq.clavier.inline_keyboard.flat().find((b) => b.callback_data.startsWith("R:"));
+  const rBtn = boutonsChoix[0];
   await clique(rBtn.callback_data);
   ok(dernierEdit().includes("Ticket : 1 sélection"), "ticket : 1 clic = 1 sélection ajoutée");
   const cdb = await clique(rBtn.callback_data);
@@ -267,8 +271,8 @@ let WORKER;
   const iBtn1 = cq.clavier.inline_keyboard.flat().find((b) => b.callback_data.startsWith("I:"));
   await clique(iBtn1.callback_data);
   ok(dernierEdit().includes("MON TICKET") && dernierEdit().includes("PROBABILITÉ COMBINÉE")
-    && dernierEdit().includes("Recopie dans Winamax"),
-    "ticket : récap proba combinée + note");
+    && dernierEdit().includes("POINTS · 1+ POINT") && dernierEdit().includes("Recopie dans Winamax"),
+    "ticket : récap affiche clairement catégorie points/buts + proba combinée");
   const jBtn = kbTk.inline_keyboard.flat().find((b) => /^J:.*:s$/.test(b.callback_data));
   const cj = await clique(jBtn.callback_data);
   ok(dernierEdit().includes("Ticket chargé") && dernierEdit().includes("3.")

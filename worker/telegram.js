@@ -1120,10 +1120,12 @@ async function ticketSave(chatId, t) {
   if (ENV.GARDIENS) await ENV.GARDIENS.put("ticket:" + chatId, JSON.stringify(t),
     { expirationTtl: TICKET_TTL }).catch(() => {});
 }
-const ICO_MK = { buteur: "⚡", pointeur: "📈", passeur: "🅰️", doubleButeur: "⚡⚡",
+const ICO_MK = { buteur: "⚽", pointeur: "📈", passeur: "🅰️", doubleButeur: "⚽⚽",
   doublePointeur: "✨", duo: "👥" };
-const LAB_MK = { buteur: "1+ but", pointeur: "1+ point", passeur: "1+ passe",
-  doubleButeur: "2+ buts", doublePointeur: "2+ points", duo: "duo 1+ but" };
+const LAB_MK = { buteur: "BUTS · 1+ BUT", pointeur: "POINTS · 1+ POINT", passeur: "PASSES · 1+ PASSE",
+  doubleButeur: "BUTS · 2+ BUTS", doublePointeur: "POINTS · 2+ POINTS", duo: "DUO · 1+ BUT" };
+const BTN_MK = { buteur: "⚽ BUTS 1+", pointeur: "📈 POINTS 1+", passeur: "🅰️ PASSES 1+",
+  doubleButeur: "⚽ BUTS 2+", doublePointeur: "✨ POINTS 2+", duo: "👥 DUO BUTS" };
 const descape = (t) => String(t).replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
 const FAMILLE_MK = { buteur: "G", doubleButeur: "G", tripleButeur: "G",
   pointeur: "P", passeur: "P", doublePointeur: "P", triplePointeur: "P" };
@@ -1137,7 +1139,9 @@ function choixDuMatch(jeux, gid) {
     .sort((a, b) => a[mk].rank - b[mk].rank).slice(0, n)
     .forEach((p) => out.push({ gid: String(gid), eq: eqs, mk, id: p.id,
       name: p.name, prob: p[mk].prob }));
-  top("pointeur", 2); top("buteur", 2); top("doublePointeur", 1);
+  // 5 choix 1+ point et 5 choix 1+ but, plus 3 options 2+ points :
+  // assez de variété sans ouvrir la sélection à tout l'effectif.
+  top("pointeur", 5); top("buteur", 5); top("doublePointeur", 3);
   const cb = (g.combos || {}).mixte && g.combos.mixte.double;
   if (cb && cb.members) out.push({ gid: String(gid), eq: eqs, mk: "duo", id: 0,
     name: cb.members.map((x) => x.name).join(" + "), prob: cb.prob });
@@ -1161,7 +1165,7 @@ function lignesTicket(sel) {
 function kbTicketHome(etat, jeux, t) {
   const lignes = [];
   ((t || {}).sel || []).forEach((x, i) => lignes.push([btn("✂️ " + (i + 1) + ". "
-    + x.name.slice(0, 24) + " " + (ICO_MK[x.mk] || ""), "U:" + etat + ":" + i)]));
+    + (BTN_MK[x.mk] || LAB_MK[x.mk] || x.mk) + " · " + x.name.slice(0, 20), "U:" + etat + ":" + i)]));
   for (let i = 0; i < jeux.length; i += 2)
     lignes.push(jeux.slice(i, i + 2).map((g) => btn(eq(g.away) + " @ " + eq(g.home),
       "Q:" + etat + ":" + g.id)));
@@ -1187,8 +1191,9 @@ function kbTicketMatch(etat, gid, choix, t) {
   const dans = (c) => ((t || {}).sel || []).some((x) => x.gid === c.gid && x.mk === c.mk
     && String(x.id) === String(c.id));
   const lignes = [];
-  choix.choix.forEach((c) => lignes.push([btn((dans(c) ? "✓ " : "+ ") + c.name.slice(0, 26) + " "
-    + (ICO_MK[c.mk] || "") + " " + Math.round(c.prob * 100) + " %",
+  choix.choix.forEach((c) => lignes.push([btn((dans(c) ? "✓ " : "+ ")
+    + (BTN_MK[c.mk] || LAB_MK[c.mk] || c.mk) + " · " + c.name.slice(0, 18)
+    + " · " + Math.round(c.prob * 100) + " %",
     "R:" + etat + ":" + c.gid + "|" + c.mk + "|" + c.id + "|" + Math.round(c.prob * 10000))]));
   lignes.push([btn("⬅️ Matchs", "N:" + etat), btn("✅ Récap", "I:" + etat)]);
   return { inline_keyboard: lignes };
