@@ -1720,7 +1720,7 @@ async function bilanJour(date) {
     [ligneTaux("  ✅ SÛR", bets.filter((x) => x.val === "SUR")),
      ligneTaux("  🔥 VALUE", bets.filter((x) => x.val === "VALUE"))].forEach((x) => x && L.push(x));
     L.push("", "🎯 <b>PAR PROBABILITÉ</b>");
-    [[0.7, 1.01, "  ≥ 70 %"], [0.5, 0.7, "  50–69 %"], [0.3, 0.5, "  30–49 %"], [0, 0.3, "  < 30 %"]]
+    [[0.7, 1.01, "  ≥ 70 %"], [0.5, 0.7, "  50–69 %"], [0.3, 0.5, "  30–49 %"], [0, 0.3, "  moins de 30 %"]]
       .forEach(([lo, hi, lab]) => {
         const x = ligneTaux(lab, bets.filter((q) => q.prob >= lo && q.prob < hi));
         if (x) L.push(x);

@@ -401,6 +401,7 @@ let WORKER;
     && (bb1.textes.includes("<b>BILAN — ") || bb1.textes.includes("Rien pour le")),
     "bilan par défaut = la veille, en 1 message — jour par défaut vérifié "
     + (res ? res.h + "/" + res.n : "?"));
+  ok(!bb1.textes.includes("< 30 %"), "bilan : tranche <30 % sans balise HTML invalide");
   // « hier » du worker = jour par défaut moins 1 jour calendrier
   const hier = new Date(new Date(defaut + "T12:00:00Z").getTime() - 86400000).toISOString().slice(0, 10);
   kvStore.set("prono:" + hier, { value: JSON.stringify({ ts: Date.now(), date: hier,
